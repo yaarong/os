@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>תרגול 7 — Signals (חלק א') | מערכות הפעלה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b54e6'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='white' font-family='monospace'>OS</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><span class="logo">OS</span><span>מערכות הפעלה · תרגולים</span></a>
+    <span class="spacer"></span>
+    <a class="nav-link" href="index.html">כל התרגולים</a>
+    <button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+
+<section class="article-head">
+  <div class="container">
+    <div class="breadcrumb"><a href="index.html">תרגולים</a> ‹ תרגול 7</div>
+    <span class="pill">תרגול 7</span>
+    <h1>סיגנלים — חלק א'</h1>
+    <p class="lead">מנגנון הסיגנלים האסינכרוני, סוגי פעולות, רישום פונקציית טיפול עם signal(), שליחה עם kill, המתנה עם pause, טיימרים עם alarm, וניהול תהליכים ב-foreground/background.</p>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>בתרגול הזה</h4>
+    <ul>
+      <li><a href="#signal">מהו Signal</a></li>
+      <li><a href="#actions">סוגי פעולות</a></li>
+      <li><a href="#handler">signal() — פונקציית טיפול</a></li>
+      <li><a href="#kill">kill</a></li>
+      <li><a href="#pause">pause</a></li>
+      <li><a href="#alarm">alarm</a></li>
+      <li><a href="#raise">raise</a></li>
+      <li><a href="#jobs">בקרת תהליכים · fg/bg</a></li>
+      <li><a href="#story">סיפור סוף התרגול</a></li>
+    </ul>
+  </aside>
+
+  <article class="content">
+
+    <h2 id="signal">מהו Signal?</h2>
+    <p>מכניזם שבעזרתו תהליכים מיודעים על מאורעות במערכת. איתות הוא <strong>מאורע אסינכרוני</strong> — תהליך צריך להיות מוכן לקבלו בכל שלב של ריצתו. הסיגנל לא חוסם את התהליך — הוא קורא במקביל מאחורי הקלעים עד שהמקבל תופס אותו.</p>
+    <p>מי יכול לאותת? מערכת ההפעלה, תהליך אחר, או התהליך עצמו. <strong>למה לאותת?</strong></p>
+    <ul>
+      <li><strong>שינוי סטטוס תהליך</strong> — <code class="inline">SIGKILL</code> (סיום), <code class="inline">SIGSTOP</code> (עצירה), <code class="inline">SIGCONT</code> (המשך).</li>
+      <li><strong>יידוע על בעיה</strong> — <code class="inline">SIGSEGV</code> (חריגה בזיכרון), <code class="inline">SIGFPE</code> (שגיאה אריתמטית, כמו חלוקה באפס).</li>
+      <li><strong>תקשורת בין תהליכים</strong> — <code class="inline">SIGUSR1</code>, <code class="inline">SIGUSR2</code>.</li>
+    </ul>
+    <p>בלינוקס סה"כ <strong>64 סיגנלים</strong>. דומה ל-enum: ניתן לקרוא להם בשם, ולכל אחד גם value מספרי (למשל SIGFPE = 8).</p>
+
+    <h2 id="actions">סוגי פעולות (Action)</h2>
+    <div class="def-grid">
+      <div class="def"><span class="term">Term</span><p>סיום התהליך.</p></div>
+      <div class="def"><span class="term">Ign</span><p>התעלמות מהאיתות.</p></div>
+      <div class="def"><span class="term">Core</span><p>יצירת core dump file וסיום התהליך.</p></div>
+      <div class="def"><span class="term">Stop</span><p>עצירת התהליך.</p></div>
+      <div class="def"><span class="term">Cont</span><p>המשכת התהליך אם היה עצור.</p></div>
+    </div>
+    <p>כשמקבלים איתות, יש 3 אפשרויות:</p>
+    <ol>
+      <li>פעולת ברירת המחדל — <code class="inline">SIG_DFL</code>.</li>
+      <li>התעלמות — חוץ משני איתותים שאסור להתעלם מהם: <code class="inline">SIGKILL</code> ו-<code class="inline">SIGSTOP</code>.</li>
+      <li>כתיבת פונקציה שמטפלת בו.</li>
+    </ol>
+
+    <h2 id="handler">signal() — הגדרת פונקציית טיפול</h2>
+    <div class="sig">#include &lt;signal.h&gt;
+<span class="c-kw">typedef</span> <span class="c-kw">void</span> (*sighandler_t)(<span class="c-ty">int</span>);
+
+sighandler_t <span class="c-fn">signal</span>(<span class="c-ty">int</span> signum, sighandler_t handler);</div>
+    <p>פונקציית הטיפול היא <code class="inline">void</code>, מקבלת את מספר הסיגנל (int). <code class="inline">signal</code> מחזירה מצביע לפונקציה הקודמת שהייתה רשומה. כשקוראים ל-signal עם אותו signum אך handler חדש — המערכת מחליפה את הרישום הישן. אם יש שגיאה → <code class="inline">SIG_ERR</code>.</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">handler_demo.c</span></div>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;unistd.h&gt;
+
+void on_sigint(int sig) {
+    printf("\nCaught signal %d (SIGINT) — but I won't quit!\n", sig);
+}
+
+int main(void) {
+    signal(SIGINT, on_sigint);   /* רושמים טיפול ל-Ctrl+C */
+    while (1) {
+        printf("working...\n");
+        sleep(1);
+    }
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר:</strong> בדרך כלל <kbd class="kbd">Ctrl+C</kbd> שולח SIGINT שמסיים את התוכנית. כאן רשמנו handler משלנו, כך שבמקום לצאת — תודפס הודעה. <strong>הקלט</strong> ל-handler הוא מספר הסיגנל (2). שימו לב ש-SIGKILL לעולם לא ניתן ללכידה כזו.</p>
+
+    <h2 id="kill">הפונקציה kill</h2>
+    <div class="sig">#include &lt;sys/types.h&gt;
+#include &lt;signal.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">kill</span>(<span class="c-ty">pid_t</span> pid, <span class="c-ty">int</span> sig);</div>
+    <p>שולחת איתות לתהליך / קבוצת תהליכים. הצלחה → 0, כישלון → −1.</p>
+    <ul>
+      <li><code class="inline">pid &gt; 0</code> — שולח לתהליך שזה ה-PID שלו.</li>
+      <li><code class="inline">pid == 0</code> — שולח לכל התהליכים שה-process group id שלהם הוא של השולח.</li>
+      <li><code class="inline">pid == -1</code> — שולח לכל התהליכים חוץ מ-init.</li>
+    </ul>
+    <div class="note tip"><div class="note-title">💡 שימוש יפה</div><p>ניתן לסמלץ <code class="inline">wait</code> באמצעות סיגנלים.</p></div>
+
+    <h2 id="pause">הפונקציה pause</h2>
+    <div class="sig">#include &lt;unistd.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">pause</span>(<span class="c-kw">void</span>);</div>
+    <p>מכניסה את התהליך למצב "הפסקה" עד שמתקבל איתות מתהליך אחר. הפונקציה חוזרת (משתחררת) <strong>רק</strong> כאשר פונקציית handler תפסה איתות וגם סיימה את פעולתה. ערך החזרה הוא −1.</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">pause_question.c</span></div>
+<pre><code class="language-c">int main(void) {
+    printf("waiting for SIGCHLD\n");
+    pause();
+    printf("waiting for SIGCHLD again\n");
+    pause();
+    printf("I'm done\n");
+    return 0;
+}</code></pre></div>
+    <p><strong>שאלה:</strong> תהליך כלשהו שולח ברצף <code class="inline">SIGCHLD</code> (שפעולת ברירת המחדל שלו היא ignore) לתוכנית. מה יודפס?</p>
+    <p><strong>פתרון:</strong> יודפס <em>רק פעם אחת</em>. אחרי ההדפסה הראשונה התהליך נכנס למצב "הפסקה" עד שיקבל איתות שהוגדר עבורו טיפול. אבל מכיוון שלא הוגדר טיפול ב-SIGCHLD — הוא <strong>לא יתעורר</strong> עקב הגעת איתות זה, ולכן יישאר תקוע ב-pause הראשון.</p>
+
+    <h2 id="alarm">הפונקציה alarm</h2>
+    <div class="sig">#include &lt;unistd.h&gt;
+<span class="c-ty">unsigned int</span> <span class="c-fn">alarm</span>(<span class="c-ty">unsigned int</span> seconds);</div>
+    <p>תהליך מבקש שישלחו אליו <code class="inline">SIGALRM</code> בעוד מספר שניות — שימושי להגבלת פעולה בזמן. כל קריאה ל-alarm מבטלת את הקודמת. הערך המוחזר: מספר השניות שחסרו עד שה-alarm הקודם היה אמור לקרות.</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">timeout.c</span></div>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;unistd.h&gt;
+
+void on_alarm(int sig) {
+    printf("Time's up!\n");
+    _exit(1);
+}
+
+int main(void) {
+    signal(SIGALRM, on_alarm);
+    alarm(5);                 /* תזמון SIGALRM בעוד 5 שניות */
+    printf("Enter input within 5 seconds:\n");
+    char buf[100];
+    fgets(buf, sizeof buf, stdin);   /* אם איטיים מדי — ה-alarm יקטע */
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר משולב:</strong> רושמים handler ל-SIGALRM, ואז <code class="inline">alarm(5)</code> קובע שבעוד 5 שניות יישלח האיתות. אם המשתמש לא מקליד בזמן — ה-handler ירוץ ויסיים את התוכנית. שילוב קלאסי של <code class="inline">signal</code> + <code class="inline">alarm</code> ליצירת timeout.</p>
+
+    <h2 id="raise">הפונקציה raise</h2>
+    <div class="sig">#include &lt;signal.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">raise</span>(<span class="c-ty">int</span> sig);</div>
+    <p>שליחת סיגנל ע"י התהליך לעצמו. <code class="inline">sig</code> הוא הסיגנל לשליחה. ערך חוזר: 0 בהצלחה, אחר בכישלון.</p>
+
+    <h2 id="jobs">בקרת תהליכים · Foreground vs Background</h2>
+    <p>הפקודה <code class="inline">ps [options]</code> נותנת צילום מצב של מה שרץ כרגע — ה-PID, הטרמינל (TTY), זמן המעבד, ושם התוכנית.</p>
+    <div class="def-grid">
+      <div class="def"><span class="term">Foreground Job</span><p>התהליך ש"תופס" את הטרמינל. כל מה שמקלידים הולך אליו וכל מה שמדפיס מופיע על המסך. רק תהליך אחד יכול להיות ב-Foreground.</p></div>
+      <div class="def"><span class="term">Background Job</span><p>תהליך שרץ "מאחורי הקלעים" — לא קשוב למקלדת, אבל ממשיך לפעול.</p></div>
+    </div>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">./a.out &amp;       # דרך א': מריצים ישר ברקע, הטרמינל נשאר פנוי
+
+# דרך ב': תוך כדי ריצה
+# Ctrl+Z   → שולח SIGTSTP, התוכנית נכנסת למצב "קפוא" (Stopped)
+bg              # ממשיך להריץ את התהליך האחרון שעצרת — אבל ברקע</code></pre></div>
+    <p><strong>למה זה שימושי?</strong> לפעולות ארוכות (קומפילציה גדולה, העתקת קבצים, הרצת שרת) — לא רוצים שהטרמינל יהיה "תפוס". <code class="inline">&amp;</code> או <code class="inline">bg</code> משחררים אותו להמשך עבודה במקביל.</p>
+
+    <h2 id="story">🎁 סיפור סוף התרגול</h2>
+    <div class="story">
+      <div class="story-tag">📖 תרגול 7 — המלך SIGKILL</div>
+      <p>בכל פעם שאתם לוחצים <kbd class="kbd">Ctrl+C</kbd> אתם שולחים SIGINT (סיגנל 2) — בקשה ידידותית לעצור. אבל המלך האמיתי הוא <strong>SIGKILL (סיגנל 9)</strong>: הסיגנל היחיד שהתהליך לא יכול לתפוס, לחסום או להתעלם ממנו. אין handler שיציל אתכם — הקרנל פשוט מוחק את התהליך מהזיכרון.</p>
+      <p>אבל יש מלכוד: אפילו SIGKILL יכול להיכשל. אם תהליך תקוע ב-<strong>Uninterruptible Sleep</strong> (מצב D ב-ps, בגלל המתנה לדרייבר או דיסק תקוע), הקרנל לא יכול להעיר אותו כדי להרוג אותו. התיעוד הרשמי של Linux אומר על זה: "זה מהווה באג במערכת ההפעלה שצריך לדווח עליו".</p>
+      <p class="moral">המסר: ארכיטקטורה טובה — בקוד, בצוות או בחיים — נמדדת ביכולת לעשות Graceful Shutdown לאיתותים קטנים, לפני שהמציאות שולחת SIGKILL.</p>
+    </div>
+
+  </article>
+</div>
+
+<nav class="pager">
+  <a class="prev" href="tirgul6.html"><span class="dir">→ הקודם</span><div class="ttl">תרגול 6 · Semaphores</div></a>
+  <a class="next" href="tirgul8.html"><span class="dir">הבא ←</span><div class="ttl">תרגול 8 · Signals ב'</div></a>
+</nav>
+
+<footer class="footer">סיכום מערכות הפעלה · © גיא יער-און</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

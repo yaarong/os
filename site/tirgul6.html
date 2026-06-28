@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>תרגול 6 — Semaphores | מערכות הפעלה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b54e6'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='white' font-family='monospace'>OS</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><span class="logo">OS</span><span>מערכות הפעלה · תרגולים</span></a>
+    <span class="spacer"></span>
+    <a class="nav-link" href="index.html">כל התרגולים</a>
+    <button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+
+<section class="article-head">
+  <div class="container">
+    <div class="breadcrumb"><a href="index.html">תרגולים</a> ‹ תרגול 6</div>
+    <span class="pill">תרגול 6</span>
+    <h1>סמפורים (Semaphores)</h1>
+    <p class="lead">קטע קריטי וסנכרון, סמפור בינארי מול מונה, פעולות אטומיות, מימוש System V (semget/semop/semctl), והשוואה בין סמפור ל-Mutex.</p>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>בתרגול הזה</h4>
+    <ul>
+      <li><a href="#cs">Critical Section</a></li>
+      <li><a href="#types">סוגי סמפורים</a></li>
+      <li><a href="#how">איך סמפור פועל</a></li>
+      <li><a href="#semget">semget</a></li>
+      <li><a href="#semop">semop</a></li>
+      <li><a href="#semctl">semctl</a></li>
+      <li><a href="#demo">דוגמה מלאה</a></li>
+      <li><a href="#vs">סמפור מול mutex</a></li>
+      <li><a href="#story">סיפור סוף התרגול</a></li>
+    </ul>
+  </aside>
+
+  <article class="content">
+
+    <h2 id="cs">Critical Section</h2>
+    <p>קטע בקוד שבו התהליך ניגש למשאב משותף (משתנה גלובלי, קובץ או זיכרון משותף). אם שני תהליכים ינסו לשנות את אותו משתנה בקטע זמן זה — הנתונים ישתבשו. <strong>Semaphore</strong> הוא מנגנון שמוודא שרק תהליך אחד בכל פעם נמצא בקטע הקריטי.</p>
+    <ul>
+      <li>הסמפור הוא אובייקט (משתנה) שכל התהליכים רואים — נקודת התיאום ביניהם.</li>
+      <li>בתוכו <strong>מונה (counter)</strong>. כדי להיכנס לקטע הקריטי, תהליך מוריד את המונה ב-1. אם המונה אפס — התהליך נאלץ לחכות.</li>
+      <li><strong>Atomic operations</strong>: הבדיקה וההורדה קורות בפעולה אחת בלתי ניתנת לחלוקה — אי אפשר ששני תהליכים יבדקו ויורידו בו-זמנית ויחשבו ששניהם יכולים להיכנס.</li>
+    </ul>
+
+    <h2 id="types">שני סוגי סמפורים</h2>
+    <div class="def-grid">
+      <div class="def"><span class="term">בינארי</span><p>הערך 1 או 0 בלבד. מתנהג כמו מנעול — פתוח או סגור. מאפשר רק לתהליך אחד להיכנס לקטע הקריטי בכל פעם.</p></div>
+      <div class="def"><span class="term">Counting semaphore</span><p>הערך יכול להיות כל מספר. מאפשר למספר מוגדר של תהליכים להיכנס לקטע הקריטי בו-זמנית.</p></div>
+    </div>
+
+    <h2 id="how">איך סמפור פועל?</h2>
+    <ul>
+      <li><strong>הגדרת הקטע הקריטי</strong> — מגדירים איזה חלק בקוד מסוכן.</li>
+      <li><strong>יצירת סמפור</strong> שיגן על הקוד.</li>
+      <li><strong>כניסה (נעילה)</strong> — הראשון נועל ונכנס. תהליכים נוספים נכנסים ל<strong>רשימת ממתינים</strong> — לא מבזבזים זמן מעבד.</li>
+      <li><strong>יציאה</strong> — כשהראשון מסיים, הוא מאותת לסמפור, שמעיר אחד מהממתינים ונותן לו רשות כניסה.</li>
+    </ul>
+    <p>בלינוקס נתמקד ב-<strong>System V Semaphores</strong>. בלינוקס לא יוצרים סמפור בודד אלא <strong>מערך (סט)</strong> של סמפורים.</p>
+
+    <h2 id="semget">1. semget — יצירה/קבלת מזהה</h2>
+    <div class="sig">#include &lt;sys/sem.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">semget</span>(<span class="c-ty">key_t</span> key, <span class="c-ty">int</span> nsems, <span class="c-ty">int</span> semflg);</div>
+    <ul>
+      <li><strong>key</strong> — שם הסמפור במערכת. תהליכים שונים שרוצים את אותו סמפור ישתמשו באותו מפתח. <code class="inline">IPC_PRIVATE</code> — "הסמפור עבורי ועבור ילדיי"; תהליכים זרים לא יגשו אליו.</li>
+      <li><strong>nsems</strong> — כמה סמפורים בסט. גישה לסמפור קיים → 0. יצירת חדש → גדול מ-0 (לרוב 1).</li>
+      <li><strong>semflg</strong> — דגלים/הרשאות. <code class="inline">IPC_CREAT</code> יוצר אם לא קיים; יחד עם <code class="inline">IPC_EXCL</code> — נכשל אם כבר קיים.</li>
+    </ul>
+    <p>הצלחה → מזהה ייחודי לסמפור, כישלון → −1.</p>
+
+    <h2 id="semop">2. semop — נעילה ושחרור</h2>
+    <div class="sig"><span class="c-ty">int</span> <span class="c-fn">semop</span>(<span class="c-ty">int</span> semid, <span class="c-kw">struct</span> <span class="c-ty">sembuf</span> *sops, <span class="c-ty">unsigned</span> nsops);</div>
+    <ul>
+      <li><strong>semid</strong> — מזהה הסמפור מ-semget.</li>
+      <li><strong>sops</strong> — מצביע למערך מבני <code class="inline">sembuf</code>, כל איבר מתאר פעולה על סמפור אחד בסט.</li>
+      <li><strong>nsops</strong> — כמה פעולות במערך (לרוב 1).</li>
+    </ul>
+    <p>בתוך <code class="inline">struct sembuf</code> שלושה שדות:</p>
+    <div class="table-wrap"><table>
+      <tr><th>שדה</th><th>משמעות</th></tr>
+      <tr><td><code>sem_num</code></td><td>על איזה סמפור בסט פועלים (0 לראשון).</td></tr>
+      <tr><td><code>sem_op</code></td><td>סוג הפעולה: <strong>חיובי (1)</strong> = שחרור משאב (מוסיף וערך ומעיר ממתינים). <strong>שלילי (−1)</strong> = נעילה (אם הערך גדול מהמוחלט — מחסירים וממשיכים, אחרת ממתינים). <strong>0</strong> = ממתינים עד שהסמפור יהיה בדיוק אפס.</td></tr>
+      <tr><td><code>sem_flg</code></td><td>דגל חשוב: <code>SEM_UNDO</code> — אם התהליך קורס בעודו מחזיק בסמפור, המערכת תחזיר אותו אוטומטית למצבו הקודם. מונע מצב שבו תהליכים מחכים לנצח למשהו מת.</td></tr>
+    </table></div>
+    <p>הצלחה → 0, כישלון → −1.</p>
+    <div class="note tip"><div class="note-title">💡 לסיכום</div><p>כניסה לקטע קריטי → <code class="inline">sem_op = -1</code>. יציאה → <code class="inline">sem_op = 1</code>.</p></div>
+
+    <h2 id="semctl">3. semctl — ניהול</h2>
+    <div class="sig"><span class="c-ty">int</span> <span class="c-fn">semctl</span>(<span class="c-ty">int</span> semid, <span class="c-ty">int</span> semnum, <span class="c-ty">int</span> cmd, <span class="c-ty">semun</span> arg);</div>
+    <p>אתחול ערכים, קבלת מידע ומחיקת הסמפור. <code class="inline">semnum</code> — מס' הסמפור בסט (בפעולות על כל הסט מתעלמים). פקודות <code class="inline">cmd</code> נפוצות:</p>
+    <div class="table-wrap"><table>
+      <tr><th>cmd</th><th>תיאור</th></tr>
+      <tr><td><code>IPC_STAT</code></td><td>"תביא לי דוח מצב" — שולפת מידע על הסמפור (בעלים, הרשאות) ל-ARG.</td></tr>
+      <tr><td><code>IPC_SET</code></td><td>"עדכן הגדרות" — שינוי הרשאות גישה של סמפור קיים.</td></tr>
+      <tr><td><code>IPC_RMID</code></td><td>מוחקת את הסמפור מהמערכת. <strong>חשוב:</strong> אם לא נמחק — יישאר בזיכרון גם אחרי שהתוכנית תסתיים.</td></tr>
+      <tr><td><code>SETVAL</code></td><td>קביעת הערך ההתחלתי (למשל 1, שיתפקד כמנעול).</td></tr>
+    </table></div>
+    <div class="note warn"><div class="note-title">⚠️ semun — להגדיר בעצמנו</div><p>לפי תקן לינוקס, <code class="inline">union semun</code> לא תמיד מוגדר בספרייה. אם לא נעתיק אותו לקוד — הקומפיילר לא יזהה את הסטרקט. לכן תמיד מעתיקים:</p>
+<pre style="background:var(--code-bg);color:var(--code-text);direction:ltr;text-align:left;padding:12px;border-radius:8px;margin-top:8px;font-family:monospace;font-size:.85rem;overflow-x:auto">union semun {
+    int val;
+    struct semid_ds *buf;
+    unsigned short *array;
+};</pre>
+    </div>
+
+    <h2 id="demo">דוגמה מלאה — מנעול בינארי</h2>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">sem_lock.c</span></div>
+<pre><code class="language-c">#include &lt;sys/types.h&gt;
+#include &lt;sys/ipc.h&gt;
+#include &lt;sys/sem.h&gt;
+
+union semun {
+    int val;
+    struct semid_ds *buf;
+    unsigned short *array;
+};
+
+int main(void) {
+    /* 1) יצירת סט עם סמפור אחד, פרטי לתהליך וילדיו */
+    int sid = semget(IPC_PRIVATE, 1, IPC_CREAT | 0666);
+
+    /* 2) אתחול ערך הסמפור ל-1 (מנעול פתוח) */
+    union semun arg;
+    arg.val = 1;
+    semctl(sid, 0, SETVAL, arg);
+
+    /* 3) הגדרת פעולות wait (P) ו-signal (V) */
+    struct sembuf P = { 0, -1, SEM_UNDO };  /* נעילה  */
+    struct sembuf V = { 0,  1, SEM_UNDO };  /* שחרור */
+
+    semop(sid, &amp;P, 1);     /* --- כניסה לקטע הקריטי --- */
+    /*  ... גישה בלעדית למשאב המשותף ...  */
+    semop(sid, &amp;V, 1);     /* --- יציאה --- */
+
+    /* 4) מחיקת הסמפור מהמערכת בסיום */
+    semctl(sid, 0, IPC_RMID, arg);
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר משולב:</strong> <code class="inline">semget</code> יוצר סט עם סמפור אחד. <code class="inline">semctl(...SETVAL)</code> מאתחל אותו ל-1 (מנעול פתוח). מבני ה-<code class="inline">sembuf</code> מגדירים שתי פעולות: <code class="inline">P</code> עם <code class="inline">sem_op=-1</code> (כניסה) ו-<code class="inline">V</code> עם <code class="inline">sem_op=+1</code> (יציאה). דגל <code class="inline">SEM_UNDO</code> מבטיח שאם נקרוס בתוך הקטע הקריטי — המערכת תשחרר את הסמפור אוטומטית. בסיום <code class="inline">IPC_RMID</code> מנקה את הסמפור מהמערכת.</p>
+
+    <h2 id="vs">סמפור מול Mutex</h2>
+    <div class="table-wrap"><table>
+      <tr><th>היבט</th><th>Mutex</th><th>Semaphore</th></tr>
+      <tr><td>מטרה</td><td>מנעול — מבטיח בלעדיות (Locking)</td><td>איתות — כמו רמזור (Signaling)</td></tr>
+      <tr><td>ייעוד</td><td>לרוב בתוך אותו תהליך (בין threads שחולקים זיכרון). קל ומהיר.</td><td>סנכרון בין תהליכים שונים או threads. מוכר ע"י כל מערכת ההפעלה.</td></tr>
+      <tr><td>מצבים</td><td>נעול / לא נעול בלבד</td><td>מונה שמאפשר למספר משאבים להיכנס</td></tr>
+      <tr><td>בעלות</td><td>יש — רק מי שנעל יכול לשחרר</td><td>אין — תהליך א' יכול להמתין ו-ב' יאותת לו לשחרר</td></tr>
+    </table></div>
+
+    <h2 id="story">🎁 סיפור סוף התרגול</h2>
+    <div class="story">
+      <div class="story-tag">📖 תרגול 6 — Mars Pathfinder</div>
+      <p>ביולי 1997, הרובר Mars Pathfinder של NASA התחיל לחוות איפוסי מערכת מסתוריים ימים אחרי הנחיתה. הסיבה? <strong>היפוך עדיפויות (priority inversion)</strong> — בעיית סנכרון. משימה בעדיפות נמוכה החזיקה mutex על אפיק משותף, משימה בעדיפות גבוהה נחסמה עליו, ומשימת תקשורת בעדיפות בינונית עקפה את הנמוכה ומנעה ממנה לשחרר את ה-mutex. טיימר ה-watchdog הבחין שהמשימה הגבוהה לא רצה ואילץ איפוס מלא.</p>
+      <p>התיקון? הפעלת <strong>priority inheritance</strong> על ה-mutex — דגל boolean ב-VxWorks, שהועלה למאדים כתוכנית C קצרה דרך interpreter שהותקן על החללית.</p>
+      <p class="moral">המסר: ניהול משאבים נכון הוא ההבדל בין הצלחה על מאדים לקריסה. זמן הוא המשאב היקר ביותר — וודאו תמיד שסדרי העדיפויות שלכם נכונים!</p>
+    </div>
+
+  </article>
+</div>
+
+<nav class="pager">
+  <a class="prev" href="tirgul5.html"><span class="dir">→ הקודם</span><div class="ttl">תרגול 5 · קבצים</div></a>
+  <a class="next" href="tirgul7.html"><span class="dir">הבא ←</span><div class="ttl">תרגול 7 · Signals א'</div></a>
+</nav>
+
+<footer class="footer">סיכום מערכות הפעלה · © גיא יער-און</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

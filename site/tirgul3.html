@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>תרגול 3 — fork · exec · exit | מערכות הפעלה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b54e6'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='white' font-family='monospace'>OS</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><span class="logo">OS</span><span>מערכות הפעלה · תרגולים</span></a>
+    <span class="spacer"></span>
+    <a class="nav-link" href="index.html">כל התרגולים</a>
+    <button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+
+<section class="article-head">
+  <div class="container">
+    <div class="breadcrumb"><a href="index.html">תרגולים</a> ‹ תרגול 3</div>
+    <span class="pill">תרגול 3</span>
+    <h1>יצירת תהליכים — fork · exec · exit</h1>
+    <p class="lead">מזהי תהליך, יצירת תהליכים עם fork, מנגנון copy-on-write, החלפת תוכנית עם exec, המתנה עם wait/waitpid, context switch, וסיום תהליך כולל זומבים ויתומים.</p>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>בתרגול הזה</h4>
+    <ul>
+      <li><a href="#ids">מזהי תהליך</a></li>
+      <li><a href="#fork">fork()</a></li>
+      <li><a href="#cow">Copy-on-write</a></li>
+      <li><a href="#count">ספירת תהליכים</a></li>
+      <li><a href="#helpers">getpid · getppid · getuid</a></li>
+      <li><a href="#exec">exec()</a></li>
+      <li><a href="#wait">wait · waitpid</a></li>
+      <li><a href="#ctx">Context switch</a></li>
+      <li><a href="#exit">exit · atexit · זומבים</a></li>
+      <li><a href="#story">סיפור סוף התרגול</a></li>
+    </ul>
+  </aside>
+
+  <article class="content">
+
+    <h2 id="ids">מזהי תהליך</h2>
+    <div class="def-grid">
+      <div class="def"><span class="term">PID</span><p>מספר ייחודי שמתקבל בזמן יצירת התהליך.</p></div>
+      <div class="def"><span class="term">UID</span><p>מספר ייחודי של המשתמש שמריץ את התהליך.</p></div>
+      <div class="def"><span class="term">PPID</span><p>המזהה של התהליך שיצר את התהליך הנוכחי (Parent).</p></div>
+      <div class="def"><span class="term">Mode / Priority</span><p>מצב התהליך (נוצר, ממתין, מחכה...) ועדיפות ההרצה שלו.</p></div>
+    </div>
+    <p>כאשר מערכת ההפעלה נטענת נוצרים תמיד 2 תהליכים: <strong>swapper</strong> (Pid=0, ניהול הזיכרון) ו-<strong>init</strong> (Pid=1, כל התהליכים הופכים לצאצאים שלו).</p>
+
+    <h2 id="fork">fork()</h2>
+    <p>הפעולה משכפלת את תהליך האב לתהליך בן, וממשיכה לשורת הקוד הבאה <strong>בשני</strong> התהליכים. לשני התהליכים:</p>
+    <ul>
+      <li>קוד זהה (מיד אחרי הקריאה ל-fork)</li>
+      <li>זיכרון זהה (משתנים וערכיהם) — אך בעותקים נפרדים!</li>
+      <li>סביבה זהה (קבצים פתוחים, fd וכו')</li>
+      <li><strong>PID שונה!</strong></li>
+    </ul>
+    <div class="sig"><span class="c-ty">pid_t</span> <span class="c-fn">fork</span>(<span class="c-kw">void</span>);  <span style="color:#7a85a3">// &lt;sys/types.h&gt; , &lt;unistd.h&gt;</span></div>
+    <div class="note info"><div class="note-title">📌 ערך מוחזר</div><p>כישלון → <code class="inline">-1</code> לאב. הצלחה → לבן מוחזר <code class="inline">0</code>, ולאב מוחזר ה-PID של הבן (גדול מ-0). זו הדרך להבדיל ביניהם בקוד.</p></div>
+
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">fork_basic.c</span></div>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;sys/types.h&gt;
+
+int main(void) {
+    pid_t pid;
+    if ((pid = fork()) == 0)
+        printf("1");      /* תהליך הבן (fork החזיר 0) */
+    else
+        printf("2");      /* תהליך האב (fork החזיר pid > 0) */
+    printf("3");          /* שני התהליכים מבצעים זאת */
+    return 0;
+}</code></pre></div>
+    <p><strong>מה יודפס?</strong> לא ניתן לדעת! (לא דטרמיניסטי, תלוי מערכת הפעלה). הדבר היחיד שבטוח: <code class="inline">3</code> לא יודפס בתחילה. אפשרויות: <code class="inline">1323</code>, <code class="inline">2313</code>, <code class="inline">2133</code>, <code class="inline">1233</code>.</p>
+
+    <h2 id="cow">מנגנון Copy-on-write</h2>
+    <p>ייחודי ללינוקס: לאחר fork, שני התהליכים משתמשים ב<strong>דפים משותפים</strong> עד לרגע שבו אחד מהם מבקש לשנות דף. אז מערכת ההפעלה מעתיקה את הדף — כך שלכל תהליך יהיה עותק פרטי — ורק אז מאפשרת את הכתיבה. כלומר, ההעתקה בפועל קורית רק כשיש שינוי.</p>
+
+    <h2 id="count">ספירת תהליכים</h2>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">many_forks.c</span></div>
+<pre><code class="language-c">fork();
+fork();
+/* ... */
+fork();   /* נקרא n פעמים ברצף */</code></pre></div>
+    <p>כל תהליך פותח 2 חדשים — כמו עץ בינארי מלא. מספר התהליכים = מספר העלים = <strong>2<sup>n</sup></strong>. מספר התהליכים <em>החדשים</em> שנוצרו = <strong>2<sup>n</sup>−1</strong>.</p>
+    <div class="note warn"><div class="note-title">⚠️ יתום (orphan)</div><p>כאשר אב מסיים והבן עדיין חי — הבן נחשב יתום. התהליך <code class="inline">init</code> (pid=1) מאמץ דיפולטיבית את כל היתומים (עבורם PPID=1).</p></div>
+
+    <h2 id="helpers">פונקציות שימושיות</h2>
+    <div class="sig"><span class="c-ty">pid_t</span> <span class="c-fn">getpid</span>(<span class="c-kw">void</span>);   <span style="color:#7a85a3">// מזהה התהליך הקורא</span>
+<span class="c-ty">pid_t</span> <span class="c-fn">getppid</span>(<span class="c-kw">void</span>);  <span style="color:#7a85a3">// מזהה תהליך האב</span>
+<span class="c-ty">uid_t</span> <span class="c-fn">getuid</span>(<span class="c-kw">void</span>);   <span style="color:#7a85a3">// מזהה המשתמש של התהליך הקורא</span></div>
+
+    <h4>דוגמה: אינסוף תהליכים</h4>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">infinite.c</span></div>
+<pre><code class="language-c">pid_t pid;
+pid = getpid();
+while (fork() == 0) {
+    if (pid == getpid())
+        break;
+}</code></pre></div>
+    <p><strong>פתרון:</strong> ייווצרו <em>אינסוף</em> תהליכים. התהליך המקורי קורא ל-fork, יוצר בן ומסיים (הערך שחזר אצלו ≠ 0). הבן נכנס ללולאה, ואצלו לא מתקיים <code class="inline">pid == getpid()</code> (כי ה-pid שונה משל האב), לכן הוא יוצר נכד ומסיים. בכל פעם "נוצר" ילד חדש שלא עומד בתנאי הברייק — וכך נוצר עץ בינארי בצורת "שרוך" אינסופי של היררכיית ילד-אב.</p>
+
+    <h2 id="exec">exec()</h2>
+    <p>נרצה להריץ תוכנית חדשה מתוך תהליך. <code class="inline">exec</code> <strong>טוענת תוכנית חדשה לביצוע במקום התוכנית הנוכחית</strong>. הפרמטר הראשון הוא שם קובץ התוכנית, ומשם — מצביעים למחרוזות הפרמטרים. הפרמטר הראשון חייב להיות שם הקובץ (מועבר פעמיים), והאחרון חייב להיות <code class="inline">NULL</code>.</p>
+    <div class="note info"><div class="note-title">📌 ערך מוחזר</div><p>כישלון → <code class="inline">-1</code>. בהצלחה — <strong>הקריאה כלל לא חוזרת</strong>, כי exec החליפה את התוכנית בחדשה.</p></div>
+    <p>וריאנטים — <code class="inline">exec{l,v}{e,p}</code>:</p>
+    <ul>
+      <li><strong>l</strong> — הארגומנטים כרשימה מופרדת בפסיקים, מסתיימת ב-NULL.</li>
+      <li><strong>v</strong> — הארגומנטים כמערך מצביעים <code class="inline">*argv</code>, האיבר האחרון NULL.</li>
+      <li><strong>e</strong> — מאפשר להעביר במפורש מערך משתני סביבה לתהליך החדש.</li>
+      <li><strong>p</strong> — משתמש ב-PATH לאיתור קובץ ההרצה (ללא צורך בנתיב מלא).</li>
+    </ul>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">exec_variants.c</span></div>
+<pre><code class="language-c">#include &lt;unistd.h&gt;
+
+/* l + נתיב מלא */
+execl("/bin/ls", "ls", "-r", "-t", "-l", NULL);
+
+/* v + נתיב מלא */
+char *args[] = { "/bin/ls", "-r", "-t", "-l", NULL };
+execv("/bin/ls", args);
+
+/* v + p : מחפש ב-PATH, אין צורך בנתיב מלא */
+char *args2[] = { "ls", "-r", "-t", "-l", NULL };
+execvp("ls", args2);</code></pre></div>
+
+    <h4>הקומבו הקלאסי: fork + exec + wait</h4>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">fork_exec_wait.c</span></div>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;sys/wait.h&gt;
+
+int main(void) {
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        /* הבן: מחליף את עצמו בפקודה ls -l */
+        char *args[] = { "ls", "-l", NULL };
+        execvp("ls", args);
+        perror("execvp failed");   /* מגיעים לכאן רק אם exec נכשלה */
+        _exit(1);
+    } else {
+        /* האב: ממתין לסיום הבן */
+        int status;
+        wait(&amp;status);
+        printf("Child finished. status=%d\n", WEXITSTATUS(status));
+    }
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר משולב:</strong> האב יוצר בן עם <code class="inline">fork</code>. הבן מריץ <code class="inline">execvp("ls", args)</code> — ה<strong>קלט</strong> הוא מערך הארגומנטים <code class="inline">{"ls","-l",NULL}</code>, וה-PATH ימצא את <code class="inline">/bin/ls</code>. מרגע שה-exec מצליחה, קוד הבן מוחלף לחלוטין ב-ls. האב קורא ל-<code class="inline">wait</code> וחוסם עד שהבן מסתיים, ואז מחלץ את קוד היציאה מ-<code class="inline">status</code>.</p>
+
+    <h2 id="wait">wait · waitpid</h2>
+    <p>כשהילד רץ, ההורה ממשיך בפעולותיו וגם ממתין לסיום הילד.</p>
+    <div class="sig">#include &lt;sys/types.h&gt;
+#include &lt;sys/wait.h&gt;
+<span class="c-ty">pid_t</span> <span class="c-fn">wait</span>(<span class="c-kw">int</span> *status);</div>
+    <ul>
+      <li>התהליך הקורא (האב) ימתין עד שאחד מבניו יסתיים.</li>
+      <li>הערך המוחזר — המזהה של הבן שהתהליך ממתין לו.</li>
+      <li><code class="inline">status</code> — מכיל מידע על סטטוס הבן שהסתיים.</li>
+    </ul>
+    <p><strong>waitpid</strong> משהה את התהליך עד שתהליך בן <em>ספציפי</em> משנה את מצבו — שליטה גמישה דרך <code class="inline">options</code>:</p>
+    <div class="sig"><span class="c-ty">pid_t</span> <span class="c-fn">waitpid</span>(<span class="c-ty">pid_t</span> pid, <span class="c-kw">int</span> *status, <span class="c-kw">int</span> options);</div>
+
+    <h2 id="ctx">Context switch</h2>
+    <p>נניח ש-init (PID=1) יוצר תהליך נוסף (PID=2) שמתחרה בו על משאבי המערכת. מערכת ההפעלה תחליף בין PID=1 לכל נתוניו לבין PID=2, תוך שמירה על חוצץ בין התהליכים. <strong>לפני שתהליך "מורדם" — נתוניו נשמרים, ולפני ש"מתעורר" — נטענים אותם נתונים לאותם מקומות בדיוק.</strong> אם משאב נחוץ תפוס ע"י תהליך אחר — התהליך יורדם שוב עד התור הבא.</p>
+
+    <h2 id="exit">exit · atexit · זומבים</h2>
+    <p><code class="inline">exit</code> מסיימת את התהליך באופן מיידי. <strong>Flush</strong> הוא העברת נתונים מזיכרון זמני אל היעד הסופי (כמו דיסק).</p>
+    <div class="sig"><span class="c-kw">void</span> <span class="c-fn">_exit</span>(<span class="c-kw">int</span> status);  <span style="color:#7a85a3">// סיום מיידי, ללא flush</span>
+<span class="c-kw">void</span> <span class="c-fn">exit</span>(<span class="c-kw">int</span> status);   <span style="color:#7a85a3">// סיום כמעט מיידי, כן מבצע flush</span>
+<span class="c-kw">int</span>  <span class="c-fn">atexit</span>(<span class="c-kw">void</span> (*function)(<span class="c-kw">void</span>));  <span style="color:#7a85a3">// רישום פונקציה לסיום</span></div>
+    <p><code class="inline">atexit</code> "רושמת" פונקציה שתיקרא בסיום נורמלי של תהליך (או דרך <code class="inline">return</code> מ-main). הפונקציות נקראות בסדר הפוך לרישום — כמו מחסנית. מחזירה 0 בהצלחה.</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">atexit_demo.c</span></div>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+void bye_a(void) { printf("A\n"); }
+void bye_b(void) { printf("B\n"); }
+
+int main(void) {
+    atexit(bye_a);    /* נרשמת ראשונה */
+    atexit(bye_b);    /* נרשמת שנייה  */
+    printf("main done\n");
+    return 0;
+}
+/* פלט (סדר הפוך — מחסנית):
+   main done
+   B
+   A                                  */</code></pre></div>
+
+    <div class="note danger"><div class="note-title">🧟 זומבים</div><p>כאשר בן מסתיים והאב לא המתין לו — הבן נחשב <strong>זומבי</strong>. ה-PCB שלו עדיין נשמר (כי האב עוד יכול לעשות wait), ורק אז ה-PCB יימחק. אם האב לא יעשה wait, הבן יהפוך ליתום ו-<code class="inline">init</code> יאמץ אותו ויעשה לו wait.</p></div>
+
+    <h2 id="story">🎁 סיפור סוף התרגול</h2>
+    <div class="story">
+      <div class="story-tag">📖 תרגול 3 — Fork Bomb</div>
+      <p>ה-fork bomb הקלאסי <code class="inline">:(){ :|:&amp; };:</code> הוא רק 13 תווים — והוא יכול להפיל כמעט כל מערכת Linux לא מוגנת תוך שניות. זוהי פונקציה שקוראת לעצמה פעמיים, ויוצרת צמיחה מעריכית של תהליכים. fork bomb בודד יכול ליצור מעל מיליון תהליכים בפחות מ-60 שניות.</p>
+      <p>בתקרית אמיתית, pull request זדוני ב-GitHub Actions הכיל fork bomb בתוך סוויטת הבדיקות, מה שהפיל את כל ה-runner host והשפיע על builds אחרים.</p>
+      <p class="moral">המסר: גם פקודה תמימה למראה יכולה להוריד שרתים שלמים. מי שמנסה לבלוע יותר מדי תהליכים "במזלג" אחד — עלול להחניק את כל המערכת. תפסת מרובה — לא תפסת.</p>
+    </div>
+
+  </article>
+</div>
+
+<nav class="pager">
+  <a class="prev" href="tirgul2.html"><span class="dir">→ הקודם</span><div class="ttl">תרגול 2 · Bash</div></a>
+  <a class="next" href="tirgul4.html"><span class="dir">הבא ←</span><div class="ttl">תרגול 4 · Threads &amp; Mutex</div></a>
+</nav>
+
+<footer class="footer">סיכום מערכות הפעלה · © גיא יער-און</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

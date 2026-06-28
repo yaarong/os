@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>תרגול 10 — IPC · PIPE · FIFO | מערכות הפעלה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b54e6'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='white' font-family='monospace'>OS</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><span class="logo">OS</span><span>מערכות הפעלה · תרגולים</span></a>
+    <span class="spacer"></span>
+    <a class="nav-link" href="index.html">כל התרגולים</a>
+    <button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+
+<section class="article-head">
+  <div class="container">
+    <div class="breadcrumb"><a href="index.html">תרגולים</a> ‹ תרגול 10</div>
+    <span class="pill">תרגול 10</span>
+    <h1>תקשורת בין תהליכים — IPC · PIPE · FIFO</h1>
+    <p class="lead">גישות לתקשורת בין תהליכים, צינורות (pipe) חד-כיווניים לפי FIFO, קריאה וכתיבה חוסמות, SIGPIPE ואטומיות, וצינורות בעלי שם (FIFO) לתהליכים לא קרובים.</p>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>בתרגול הזה</h4>
+    <ul>
+      <li><a href="#ipc">תקשורת בין תהליכים</a></li>
+      <li><a href="#lseek">lseek</a></li>
+      <li><a href="#pipe">PIPE</a></li>
+      <li><a href="#pipecall">קריאת המערכת pipe</a></li>
+      <li><a href="#readpipe">קריאה מ-PIPE</a></li>
+      <li><a href="#writepipe">כתיבה ל-PIPE</a></li>
+      <li><a href="#fifo">FIFO</a></li>
+      <li><a href="#story">סיפור סוף התרגול</a></li>
+    </ul>
+  </aside>
+
+  <article class="content">
+
+    <h2 id="ipc">תקשורת בין תהליכים (IPC)</h2>
+    <p>איך מעבירים מידע בין תהליכים? שתי גישות ראשוניות:</p>
+    <ul>
+      <li><strong>סיגנלים</strong> — בכל פעם שצד אחד רוצה להעביר מידע, הוא שולח סיגנל. אך כשרוצים להעביר <em>נתונים</em> — זה לא כלי מתאים.</li>
+      <li><strong>קבצים</strong> — תהליך א' כותב לקובץ ותהליך ב' קורא ממנו. הקשיים: לא תוכנן כערוץ תקשורת ישיר, גישה לכונן איטית (Overhead), ובעיית סנכרון — תהליך הקריאה חייב לדעת בוודאות שהכתיבה הסתיימה, אחרת יקבל מידע לא שלם.</li>
+    </ul>
+    <p>בתוך ה-Open File Description יש את ה-<strong>current file offset</strong>. כששני תהליכים משתמשים בקובץ כערוץ — הם מצביעים לאותו OFD וחולקים את אותו offset, ושניהם חייבים לדעת היכן הסמן בכל רגע.</p>
+
+    <h2 id="lseek">קריאת המערכת lseek</h2>
+    <div class="sig">#include &lt;sys/types.h&gt;
+#include &lt;unistd.h&gt;
+<span class="c-ty">off_t</span> <span class="c-fn">lseek</span>(<span class="c-ty">int</span> fd, <span class="c-ty">off_t</span> offset, <span class="c-ty">int</span> whence);</div>
+    <p>משנה את ה-current file offset, וכך שולטת מהיכן יתבצעו קריאה/כתיבה. <code class="inline">whence</code>: <code class="inline">SEEK_SET</code> (מתחילת הקובץ), <code class="inline">SEEK_CUR</code> (מהמיקום הנוכחי), <code class="inline">SEEK_END</code> (מסוף הקובץ).</p>
+
+    <h2 id="pipe">PIPE</h2>
+    <p>נגדיר PIPE כ<strong>זרם נתונים חד-כיווני</strong> שמתנהל לפי <strong>FIFO</strong> (ראשון נכנס, ראשון יוצא). זהו פתרון IPC טוב יותר כי הוא מובנה לסנכרון תהליכים, ללא ניהול ידני של אופסטים.</p>
+    <ul>
+      <li>הנתונים זורמים בכיוון אחד בלבד.</li>
+      <li>הנתונים יוצאים באותו סדר שנכנסו.</li>
+      <li>הגישה דרך שני fd נפרדים — אחד לקריאה בלבד והשני לכתיבה בלבד.</li>
+      <li><strong>אין גישה אקראית</strong> — לא ניתן לומר "לך לבית 100"; הנתונים זזים, לא יושבים בכתובות.</li>
+    </ul>
+    <p>ניתן לדמיין תהליך אחד שדוחף "כדורים" (יחידות מידע) לצינור, ותהליך שני בצד השני שתופס אותם. כשמערכת ההפעלה יוצרת את הצינור, היא נותנת זוג מפתחות — אחד לכתיבה ואחד לקריאה.</p>
+
+    <h2 id="pipecall">קריאת המערכת pipe</h2>
+    <div class="sig">#include &lt;unistd.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">pipe</span>(<span class="c-ty">int</span> filedes[2]);</div>
+    <p>שולחים מערך של 2 int, והפונקציה ממלאת אותו ב-FD: <code class="inline">filedes[0]</code> לקריאה, <code class="inline">filedes[1]</code> לכתיבה. ערך מוחזר: 0 בהצלחה, −1 בכישלון.</p>
+    <div class="note info"><div class="note-title">📌 צינור פרטי + fork</div><p>הצינור פרטי לתהליך שיצר אותו — תהליך זר לא יודע שהוא קיים. בעת <code class="inline">fork()</code>, הבן מקבל עותק של טבלת ה-FD של האב, ולכן יש לו אותו FD שמצביע לאותו צינור. לאחר ה-fork <strong>יש לסגור את הקצוות המיותרים</strong>: אם האב כותב הוא לא צריך את fd הקריאה, ואם הבן קורא הוא לא צריך את fd הכתיבה — אחרת התוכנית עלולה להיתקע.</p></div>
+
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">pipe_demo.c</span></div>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;string.h&gt;
+
+int main(void) {
+    int fd[2];
+    pipe(fd);                 /* fd[0]=קריאה , fd[1]=כתיבה */
+
+    if (fork() == 0) {
+        /* --- הבן: קורא --- */
+        close(fd[1]);                 /* לא צריך את קצה הכתיבה */
+        char buf[64];
+        int n = read(fd[0], buf, sizeof buf);
+        buf[n] = '\0';
+        printf("Child received: %s\n", buf);
+        close(fd[0]);
+    } else {
+        /* --- האב: כותב --- */
+        close(fd[0]);                 /* לא צריך את קצה הקריאה */
+        char *msg = "Hello from parent";
+        write(fd[1], msg, strlen(msg));
+        close(fd[1]);                 /* סגירה → שולח EOF לקורא */
+    }
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר משולב:</strong> יוצרים צינור עם <code class="inline">pipe(fd)</code>, ואז <code class="inline">fork</code>. כל צד <strong>סוגר את הקצה שאינו צריך</strong>: האב סוגר את הקריאה והבן את הכתיבה. האב כותב <strong>קלט</strong> = המחרוזת "Hello from parent" לתוך <code class="inline">fd[1]</code>, והבן קורא אותה מ-<code class="inline">fd[0]</code>. סגירת קצה הכתיבה ע"י האב היא שמסמנת לבן את סוף הנתונים (EOF).</p>
+
+    <h2 id="readpipe">קריאה מ-PIPE</h2>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">read example</span></div>
+<pre><code class="language-c">read(filedes[0], buff, BUFF_SIZE);</code></pre></div>
+    <ul>
+      <li>בניגוד לקובץ רגיל (שמחזיר 0 בתים אם ריק) — קריאה מצינור <strong>ריק</strong> כשעדיין יש תהליכים שמחזיקים את ה-write descriptor פתוח → התהליך <strong>נחסם</strong> ומחכה שייכתבו נתונים חדשים.</li>
+      <li>כשהתהליך מתעורר, <code class="inline">read</code> מחזירה את כמות הנתונים הזמינה. היא מחזירה <strong>0 אם ורק אם</strong> כל ה-write descriptors נסגרו — סימן לקורא שאין מה לחכות יותר.</li>
+      <li>בזמן ההמתנה התהליך ישן ולא מבזבז CPU.</li>
+    </ul>
+
+    <h2 id="writepipe">כתיבה ל-PIPE</h2>
+    <div class="def-grid">
+      <div class="def"><span class="term">יש מקום פנוי</span><p>אם יש תהליך קורא פעיל — הכתיבה מתבצעת במלואה. אם <strong>כל</strong> ה-read descriptors נסגרו — המערכת שולחת <code class="inline">SIGPIPE</code> ומחזירה כישלון (אין למי לכתוב).</p></div>
+      <div class="def"><span class="term">הצינור מלא</span><p>אם יש קורא פעיל — הכתיבה <strong>נחסמת</strong> וממתינה עד שיתפנה מקום. אם אין קורא — <code class="inline">SIGPIPE</code> וכישלון.</p></div>
+    </div>
+    <ul>
+      <li>כתיבה של כמות קטנה מ-<code class="inline">BUF_SIZE</code> <strong>מובטחת להיות אטומית</strong> — אם שני תהליכים כותבים בו-זמנית, הנתונים לא יתערבבו.</li>
+      <li>גודל ה-PIPE מוגבל.</li>
+    </ul>
+
+    <h2 id="fifo">FIFO — צינור בעל שם</h2>
+    <p><strong>הבעיה ב-PIPE:</strong> רק תהליכים קרובי משפחה (אב ובן) יכולים לתקשר. הפתרון: לתת לצינור <strong>שם</strong> כמו לקובץ. כל תהליך שיודע את הנתיב יכול לפתוח אותו עם <code class="inline">open()</code> רגיל, ומערכת ההפעלה מקשרת בין הצדדים בדיוק כמו ב-PIPE רגיל.</p>
+    <ul>
+      <li>PIPE ציבורי שדרכו כל התהליכים יכולים לתקשר.</li>
+      <li>נוצר ע"י <code class="inline">mknod()</code> או <code class="inline">mkfifo()</code>.</li>
+      <li>שם ה-FIFO הוא כשם קובץ במערכת הקבצים, <strong>למרות שאינו קובץ כלל</strong>.</li>
+      <li>פתיחה לקריאה בלבד נחסמת עד שתהליך אחר יפתח לכתיבה (ולהפך). פתיחה לקריאה+כתיבה יחד — לא חוסמת.</li>
+      <li>לא משוחרר אוטומטית — יש לפנותו במפורש (<code class="inline">rm</code>).</li>
+    </ul>
+    <div class="sig">#include &lt;sys/types.h&gt;
+#include &lt;sys/stat.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">mknod</span>(<span class="c-kw">const</span> <span class="c-ty">char</span> *pathname, <span class="c-ty">mode_t</span> mode, <span class="c-ty">dev_t</span> dev);
+<span class="c-ty">int</span> <span class="c-fn">mkfifo</span>(<span class="c-kw">const</span> <span class="c-ty">char</span> *pathname, <span class="c-ty">mode_t</span> mode);</div>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">fifo_demo.c</span></div>
+<pre><code class="language-c">#include &lt;sys/types.h&gt;
+#include &lt;sys/stat.h&gt;
+#include &lt;fcntl.h&gt;
+
+#define MODE_MKNOD  (S_IFIFO | S_IRUSR | S_IWUSR)
+#define MODE_MKFIFO (S_IRUSR | S_IWUSR)
+
+int main(void) {
+    /* יצירת ה-FIFO בשם myfifo.f */
+    mknod("myfifo.f", MODE_MKNOD, 0);
+    /* או, חלופה פשוטה יותר: */
+    mkfifo("myfifo.f", MODE_MKFIFO);
+
+    /* כעת פותחים אותו כמו קובץ רגיל */
+    int fd = open("myfifo.f", O_RDONLY);
+    /* ... read/write דרך fd ... */
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר משולב:</strong> <code class="inline">mknod</code>/<code class="inline">mkfifo</code> יוצרים קובץ מסוג FIFO בשם <code class="inline">myfifo.f</code> עם הרשאות מתאימות. מרגע שהוא קיים בשם, <em>כל</em> תהליך — גם לא קרוב משפחה — יכול לפתוח אותו עם <code class="inline">open()</code>; אחד יפתח לקריאה והשני לכתיבה, והנתונים יזרמו בזיכרון הקרנל.</p>
+
+    <h2 id="story">🎁 סיפור סוף התרגול</h2>
+    <div class="story">
+      <div class="story-tag">📖 תרגול 10 — לידת ה-Pipe</div>
+      <p>ב-1973, דאג מקאילרוי מ-Bell Labs הציע את ה-pipe — דרך לחבר את הפלט של תוכנה אחת לקלט של אחרת. קן תומפסון אהב את הרעיון כל כך שמימש pipes בקרנל Unix בלילה אחד. בבוקר שאחרי, כולם ב-Bell Labs שרשרו תוכנות קטנות יחד: <code class="inline">cat file | grep pattern | sort | uniq -c</code>.</p>
+      <p>הפילוסופיה הזו — תוכנות קטנות שעושות דבר אחד טוב, מחוברות דרך pipes — קדמה לארכיטקטורת microservices ב-40 שנה. הרעיון זהה: רכיבים עצמאיים שמתקשרים דרך ממשקים מוגדרים היטב.</p>
+      <p class="moral">המסר: בחיים תצטרכו Pipes — שיתופי פעולה פשוטים שיוצרים שלם הגדול מסך חלקיו; אך כדי לחבר בין עולמות שונים לחלוטין, ייתכן ותצטרכו FIFOs — ערוצי תקשורת קבועים, עצמאיים ובעלי שם.</p>
+    </div>
+
+  </article>
+</div>
+
+<nav class="pager">
+  <a class="prev" href="tirgul9.html"><span class="dir">→ הקודם</span><div class="ttl">תרגול 9 · Links</div></a>
+  <a class="next" href="tirgul11.html"><span class="dir">הבא ←</span><div class="ttl">תרגול 11 · זיכרון וירטואלי</div></a>
+</nav>
+
+<footer class="footer">סיכום מערכות הפעלה · © גיא יער-און</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

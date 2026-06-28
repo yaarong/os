@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>סיכום תרגולים – מערכות הפעלה 2026 | © גיא יער-און</title>
+<meta name="description" content="סיכום אינטראקטיבי של תרגולי מערכות הפעלה – מבוא, bash, fork/exec, חוטים, mutex, קבצים, סמפורים, סיגנלים, links, IPC וזיכרון וירטואלי.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b54e6'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='white' font-family='monospace'>OS</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html">
+      <span class="logo">OS</span>
+      <span>מערכות הפעלה · תרגולים</span>
+    </a>
+    <span class="spacer"></span>
+    <button id="themeBtn" class="theme-btn" onclick="toggleTheme()" aria-label="החלפת ערכת נושא">🌙</button>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="hero-inner">
+    <span class="eyebrow">סיכום תרגולים · 2026</span>
+    <h1>מערכות הפעלה — סיכום אינטראקטיבי</h1>
+    <p class="sub">כל תרגול מקבל עמוד ייעודי עם כל החומר, הגדרות מפורטות, חתימות פונקציות והמון דוגמאות קוד מוסברות.</p>
+    <p class="author">© גיא יער-און · השימוש בסיכום על אחריותכם בלבד</p>
+  </div>
+</section>
+
+<main class="container section-pad">
+
+  <div class="note info" style="margin-bottom:34px">
+    <div class="note-title">ℹ️ הערה לפני שמתחילים</div>
+    <p>לפי המרצה, התרגולים מכסים לרוב חומר שונה לגמרי מההרצאות, ואף נשאלים במבחן בחלק ייעודי שנקרא "חומר מהתרגול". לכן סיכום זה מופרד מסיכום ההרצאה. לחצו על כל כרטיס כדי להגיע לעמוד המלא של אותו תרגול.</p>
+  </div>
+
+  <div class="grid">
+
+    <a class="card" href="tirgul1.html">
+      <span class="num">1</span>
+      <h3>מבוא למערכות הפעלה</h3>
+      <p>תפקידי מערכת ההפעלה, ארכיטקטורת פון נוימן, רמות פריווילגיה, system calls ופקודות לינוקס.</p>
+      <div class="tags"><span class="tag">Rings</span><span class="tag">PSW</span><span class="tag">chmod</span><span class="tag">permissions</span></div>
+      <span class="go">למעבר לתרגול ←</span>
+    </a>
+
+    <a class="card" href="tirgul2.html">
+      <span class="num">2</span>
+      <h3>Bash &amp; Scripting</h3>
+      <p>shell, ערוצים סטנדרטיים, הפניות קלט/פלט, pipelines, משתני סביבה, סקריפטים ובקרת זרימה.</p>
+      <div class="tags"><span class="tag">stdin/out/err</span><span class="tag">grep</span><span class="tag">test</span><span class="tag">PATH</span></div>
+      <span class="go">למעבר לתרגול ←</span>
+    </a>
+
+    <a class="card" href="tirgul3.html">
+      <span class="num">3</span>
+      <h3>fork · exec · exit</h3>
+      <p>יצירת תהליכים, copy-on-write, משפחת exec, wait/waitpid, context switch, זומבים ויתומים.</p>
+      <div class="tags"><span class="tag">fork()</span><span class="tag">execvp</span><span class="tag">wait()</span><span class="tag">zombie</span></div>
+      <span class="go">למעבר לתרגול ←</span>
+    </a>
+
+    <a class="card" href="tirgul4.html">
+      <span class="num">4</span>
+      <h3>Threads &amp; Mutex</h3>
+      <p>חוטים, Process Descriptor, POSIX Threads, Thread Group/TGID, pthread API ומנגנון Mutex.</p>
+      <div class="tags"><span class="tag">pthread_create</span><span class="tag">join</span><span class="tag">TGID</span><span class="tag">mutex</span></div>
+      <span class="go">למעבר לתרגול ←</span>
+    </a>
+
+    <a class="card" href="tirgul5.html">
+      <span class="num">5</span>
+      <h3>קבצים &amp; System Calls</h3>
+      <p>open/read/write/close, ניהול תיקיות, dup/dup2, I/O redirection, lseek, errno ובאפרינג.</p>
+      <div class="tags"><span class="tag">open()</span><span class="tag">readdir</span><span class="tag">dup2</span><span class="tag">lseek</span></div>
+      <span class="go">למעבר לתרגול ←</span>
+    </a>
+
+    <a class="card" href="tirgul6.html">
+      <span class="num">6</span>
+      <h3>Semaphores</h3>
+      <p>Critical Section, סמפור בינארי ומונה, System V (semget/semop/semctl) והשוואה ל-Mutex.</p>
+      <div class="tags"><span class="tag">semget</span><span class="tag">semop</span><span class="tag">SEM_UNDO</span><span class="tag">IPC</span></div>
+      <span class="go">למעבר לתרגול ←</span>
+    </a>
+
+    <a class="card" href="tirgul7.html">
+      <span class="num">7</span>
+      <h3>Signals — חלק א'</h3>
+      <p>מנגנון הסיגנלים, פעולות ברירת מחדל, signal(), kill, pause, alarm, raise ובקרת תהליכים.</p>
+      <div class="tags"><span class="tag">SIGKILL</span><span class="tag">handler</span><span class="tag">alarm</span><span class="tag">fg/bg</span></div>
+      <span class="go">למעבר לתרגול ←</span>
+    </a>
+
+    <a class="card" href="tirgul8.html">
+      <span class="num">8</span>
+      <h3>Signals — חלק ב'</h3>
+      <p>שליחת סיגנלים, חסימה ובעיות סנכרון, sigprocmask, sigaction, sigpending וקבוצות סיגנלים.</p>
+      <div class="tags"><span class="tag">sigprocmask</span><span class="tag">sigaction</span><span class="tag">sa_mask</span><span class="tag">PENDING</span></div>
+      <span class="go">למעבר לתרגול ←</span>
+    </a>
+
+    <a class="card" href="tirgul9.html">
+      <span class="num">9</span>
+      <h3>Links &amp; Inodes</h3>
+      <p>File Descriptor, Open File Description, inode, תיקיות, Hard/Soft Link, קישור שבור ו-stat.</p>
+      <div class="tags"><span class="tag">inode</span><span class="tag">link()</span><span class="tag">symlink</span><span class="tag">stat()</span></div>
+      <span class="go">למעבר לתרגול ←</span>
+    </a>
+
+    <a class="card" href="tirgul10.html">
+      <span class="num">10</span>
+      <h3>IPC · PIPE · FIFO</h3>
+      <p>תקשורת בין תהליכים, lseek, צינורות (pipe), קריאה/כתיבה חוסמות, SIGPIPE ו-FIFO בעלי שם.</p>
+      <div class="tags"><span class="tag">pipe()</span><span class="tag">FIFO</span><span class="tag">mkfifo</span><span class="tag">SIGPIPE</span></div>
+      <span class="go">למעבר לתרגול ←</span>
+    </a>
+
+    <a class="card" href="tirgul11.html">
+      <span class="num">11</span>
+      <h3>זיכרון וירטואלי &amp; Shared Memory</h3>
+      <p>זיכרון פיזי מול וירטואלי, דפים ומסגרות, paging וזיכרון משותף (shmget/shmat/shmctl).</p>
+      <div class="tags"><span class="tag">pages</span><span class="tag">frames</span><span class="tag">shmget</span><span class="tag">shmat</span></div>
+      <span class="go">למעבר לתרגול ←</span>
+    </a>
+
+  </div>
+
+  <hr class="divider">
+
+  <div class="story">
+    <div class="story-tag">🎁 בונוס — "סיפורים של סוף תרגול"</div>
+    <p>לפי עינת, המתרגלים קיבלו אישור שתהיה במבחן שאלת בונוס של 3 נקודות על הסיפורים שבסוף כל תרגול. בכל עמוד תרגול תמצאו את הסיפור הרלוונטי שלו (Shellshock, fork bomb, Therac-25, Mars Pathfinder, OpenSSH ועוד) — מרוכזים לנוחותכם.</p>
+  </div>
+
+</main>
+
+<footer class="footer">
+  סיכום מערכות הפעלה · תרגולים 2026 · © גיא יער-און — ייתכן שנפלו טעויות, השימוש על אחריותכם בלבד.
+</footer>
+
+<script src="assets/script.js"></script>
+</body>
+</html>

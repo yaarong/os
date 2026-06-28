@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>תרגול 2 — Bash &amp; Scripting | מערכות הפעלה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b54e6'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='white' font-family='monospace'>OS</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><span class="logo">OS</span><span>מערכות הפעלה · תרגולים</span></a>
+    <span class="spacer"></span>
+    <a class="nav-link" href="index.html">כל התרגולים</a>
+    <button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+
+<section class="article-head">
+  <div class="container">
+    <div class="breadcrumb"><a href="index.html">תרגולים</a> ‹ תרגול 2</div>
+    <span class="pill">תרגול 2</span>
+    <h1>Bash &amp; Shell Scripting</h1>
+    <p class="lead">מהו ה-shell, שלושת הערוצים הסטנדרטיים, הפניות קלט/פלט, pipelines, משתנים ומשתני סביבה, כתיבת סקריפטים ובקרת זרימה.</p>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>בתרגול הזה</h4>
+    <ul>
+      <li><a href="#shell">מהו ה-shell</a></li>
+      <li><a href="#fd">ערוצים סטנדרטיים</a></li>
+      <li><a href="#redirect">הפניות קלט/פלט</a></li>
+      <li><a href="#tools">wc · head · tail · pipe</a></li>
+      <li><a href="#vars">משתנים ומשתני סביבה</a></li>
+      <li><a href="#script">סקריפטים וארגומנטים</a></li>
+      <li><a href="#path">הרצה מכל מקום (PATH)</a></li>
+      <li><a href="#syntax">grep · אריתמטיקה · test · מערכים</a></li>
+      <li><a href="#flow">בקרת זרימה</a></li>
+      <li><a href="#story">סיפור סוף התרגול</a></li>
+    </ul>
+  </aside>
+
+  <article class="content">
+
+    <h2 id="shell">מהו ה-shell?</h2>
+    <p>תוכנית שמספקת ממשק פקודות בין משתמש יחיד למערכת ההפעלה (ה-kernel). ישנן שתי משפחות:</p>
+    <div class="def-grid">
+      <div class="def"><span class="term">Sh</span><p>סינטקס שמזכיר פסקל. הגרסה הפופולרית: <strong>bash</strong>.</p></div>
+      <div class="def"><span class="term">Csh</span><p>סינטקס שמזכיר C. הגרסה הפופולרית: <strong>tcsh</strong>.</p></div>
+    </div>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">echo $SHELL   # מציג איזה shell בשימוש, למשל /bin/bash</code></pre></div>
+
+    <h2 id="fd">שלושת הערוצים הסטנדרטיים</h2>
+    <p>בכל תהליך פתוחים שלושה ערוצים סטנדרטיים, כל אחד מיוצג ע"י <strong>fd</strong> (File Descriptor):</p>
+    <div class="table-wrap"><table>
+      <tr><th>fd</th><th>שם</th><th>תפקיד</th></tr>
+      <tr><td><code>0</code></td><td>stdin</td><td>ערוץ קלט סטנדרטי — משם התוכנית קוראת נתונים.</td></tr>
+      <tr><td><code>1</code></td><td>stdout</td><td>ערוץ פלט סטנדרטי — לשם התוכנית כותבת.</td></tr>
+      <tr><td><code>2</code></td><td>stderr</td><td>ערוץ שגיאות סטנדרטי — מחובר למסך כברירת מחדל, נפרד למען הודעות שגיאה דחופות.</td></tr>
+    </table></div>
+
+    <h2 id="redirect">הפניות קלט/פלט</h2>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">ls > a.txt              # כותב לתוך a.txt את שמות כל הקבצים בתיקייה
+                        # אם a.txt לא קיים — ה-shell יוצר אותו
+
+echo "Hello!" > a.txt   # הפניית פלט עם דריסה: כל תוכן קודם נמחק
+echo "More" >> a.txt    # הפניית פלט עם הוספה (ללא דריסה)
+
+sort < a.txt            # הפניית קלט: מעביר את ערכי הקובץ אל sort שתמיין אותם
+
+# << (here-document): כמה שורות קלט עד שמגיעים ל-delimiter
+cat << END
+Hey!
+Bye!
+Guy
+END</code></pre></div>
+
+    <h2 id="tools">wc · head · tail · pipeline</h2>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">wc a.txt        # ברירת מחדל: מספר שורות, מילים, בתים + שם הקובץ
+wc -l a.txt     # רק מספר שורות (סופר \n)
+wc -w a.txt     # רק מספר מילים
+wc -m a.txt     # רק מספר תווים
+wc -c a.txt     # רק מספר בתים
+
+head file       # 10 השורות הראשונות (ברירת מחדל)
+head -5 file    # 5 השורות הראשונות
+tail file       # 10 השורות האחרונות
+tail -5 file    # 5 השורות האחרונות
+
+# Pipeline: הפלט של תוכנית אחת הופך לקלט של הבאה (אין מגבלה על מספר ה-|)
+ls | wc -l      # כמה קבצים יש בתיקייה הנוכחית
+who | wc -l     # מספר המשתמשים המחוברים</code></pre></div>
+
+    <h2 id="vars">משתנים ומשתני סביבה</h2>
+    <p>משתנים מקומיים מוכרים רק ל-shell, לא לסקריפטים/פקודות אחרות.</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">NEWVAR="Hey"        # אתחול משתנה (שם בד"כ באותיות גדולות, ללא רווחים סביב =)
+echo $NEWVAR        # התייחסות לתוכן — בעזרת הדולר → Hey
+
+# משתני סביבה מועברים בין תוכניות ופקודות:
+export NEWVAR       # הפיכת משתנה רגיל למשתנה סביבה
+env                 # הצגת כל משתני הסביבה</code></pre></div>
+    <div class="note info"><div class="note-title">📌 טווח השפעה</div><p>שינוי ערך משתנה סביבה משפיע רק על הטרמינל הנוכחי והתוכניות שהוא יריץ. לשינוי ברמת המערכת כולה — יש לערוך את הקובץ <code class="inline">/etc/environment</code>.</p></div>
+
+    <h2 id="script">סקריפט — תוכנית של מפרש (interpreter)</h2>
+    <p>סקריפט מורץ ע"י מפרש, ללא קומפילציה — שורה אחר שורה. מפרש נפוץ הוא bash. יתרונות: מהירות ועיבוד מחרוזות טוב.</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">myscript.sh</span></div>
+<pre><code class="language-bash">#!/bin/bash          # Shabang — אומר למערכת איזה מפרש להריץ
+
+echo "Hello, $1"     # $1 = הארגומנט הראשון, $0 = שם הסקריפט עצמו
+echo "Args: $#"      # מספר הארגומנטים שהועברו
+
+exit 0               # נהוג ונחמד לסיים ב-exit 0</code></pre></div>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">chmod +x myscript.sh
+./myscript.sh Guy        # ה-shell מכניס "Guy" ל-$1 → Hello, Guy</code></pre></div>
+
+    <h2 id="path">איך מריצים סקריפטים מכל מקום?</h2>
+    <p>נהפוך את הסקריפט לפקודה שמוכרת ע"י המערכת בעזרת עדכון משתנה הסביבה <code class="inline">PATH</code>:</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">mkdir $HOME/myScripts                  # שלב 1: תיקייה לכל הסקריפטים
+mv dirFiles $HOME/myScripts            # שלב 2: מעבירים לתוכה את הסקריפט
+PATH=$HOME/myScripts:$PATH             # שלב 3: "חפש קודם כאן, ואז בשאר המקומות"
+
+dirFiles                               # כעת ירוץ מכל מקום כמו פקודה רגילה</code></pre></div>
+    <div class="note warn"><div class="note-title">⚠️ זמני בלבד</div><p>אם נסגור את הטרמינל — ה-shell ישכח את הנתיב הזה.</p></div>
+
+    <h2 id="syntax">פקודות וסינטקס נוסף</h2>
+    <h3>grep</h3>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">grep [options] pattern [files]
+grep -c "error" log.txt    # -c → מספר השורות שמכילות את התבנית
+grep -i "warn" log.txt     # -i → התעלמות מאותיות גדולות/קטנות</code></pre></div>
+
+    <h3>ביטויים אריתמטיים</h3>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">num1=8
+num1=$num1+7        # תוצאה כמחרוזת! → "8+7"
+num1=$[$num1+7]     # סוגריים מרובעים → חישוב אמיתי</code></pre></div>
+
+    <h3>test — אמת/שקר (הפוך מהאינטואיציה!)</h3>
+    <div class="note tip"><div class="note-title">💡 שימו לב</div><p>בעולם ה-shell: <strong>אמת = 0</strong>, <strong>שקר = 1</strong>. המשתנה <code class="inline">$?</code> מחזיק את תוצאת החישוב האחרון.</p></div>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">test 1=2 ; echo $?    # ללא רווחים → השמה שהצליחה → 0 ("אמת")
+test 1 = 2 ; echo $?  # עם רווחים → בדיקה אמיתית → 1 ("שקר")</code></pre></div>
+
+    <h3>מערכים</h3>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">arr=(x1 x2 x3)       # הגדרת מערך
+arr[0]="Hey!"        # השמה לאיבר
+echo ${arr[2]}       # גישה לאיבר
+
+echo ${arr[@]}       # כל האיברים — @ : ירידת שורה בין ערכים
+echo ${arr[*]}       # כל האיברים — * : בשורה אחת</code></pre></div>
+
+    <h2 id="flow">בקרת זרימה</h2>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">control_flow.sh</span></div>
+<pre><code class="language-bash">#!/bin/bash
+
+# If — הפוך מהרגיל: אם condition מחזיר 0 → מבוצע true_commands
+if condition_command
+then
+    echo "true_commands"
+else
+    echo "false_commands"
+fi
+
+# While
+while [ condition ]
+do
+    echo "running..."
+done
+
+# For
+for variable in word1 word2 word3
+do
+    echo "$variable"
+done
+
+# פונקציות
+greet() {
+    echo "Hello, $1!"
+}
+greet "World"        # קריאה עם ארגומנט → Hello, World!</code></pre></div>
+    <p><strong>הסבר משולב:</strong> ה-<code class="inline">if</code> בודק קוד יציאה (0 = הצלחה = "אמת"), הלולאות עוטפות בלוק <code class="inline">do..done</code>, והפונקציה <code class="inline">greet</code> מקבלת ארגומנטים בדיוק כמו סקריפט (<code class="inline">$1</code>). <strong>הקלט</strong> לדוגמה האחרונה: המחרוזת "World" → הפלט: <code class="inline">Hello, World!</code>.</p>
+
+    <h2 id="story">🎁 סיפור סוף התרגול</h2>
+    <div class="story">
+      <div class="story-tag">📖 תרגול 2 — Shellshock</div>
+      <p>בספטמבר 2014 התגלה באג בן 25 שנה ב-Bash עצמו — אותו shell שלמדתם לכתוב בו סקריפטים. הבאג, <strong>Shellshock (CVE-2014-6271)</strong>, ניצל את האופן שבו Bash מטפל במשתני סביבה והגדרות פונקציות. תוקף יכול היה להזריק פקודות שרירותיות דרך משתני סביבה מעוצבים במיוחד.</p>
+      <p>מכיוון ש-Bash נמצא בכל מקום — שרתי ווב (CGI), SSH, לקוחות DHCP — הבאג חשף מאות מיליוני מערכות. הוא התקיים מאז Bash 1.03 ב-1989, ולקח 25 שנה עד שמישהו שם לב.</p>
+      <p class="moral">המסר: ה-Shell הוא לא רק כלי עבודה, הוא משטח תקיפה קריטי. With great power comes great responsibility!</p>
+    </div>
+
+  </article>
+</div>
+
+<nav class="pager">
+  <a class="prev" href="tirgul1.html"><span class="dir">→ הקודם</span><div class="ttl">תרגול 1 · מבוא</div></a>
+  <a class="next" href="tirgul3.html"><span class="dir">הבא ←</span><div class="ttl">תרגול 3 · fork/exec/exit</div></a>
+</nav>
+
+<footer class="footer">סיכום מערכות הפעלה · © גיא יער-און</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>
