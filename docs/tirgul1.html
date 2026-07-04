@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>תרגול 1 — מבוא, System Calls, לינוקס | מערכות הפעלה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b54e6'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='white' font-family='monospace'>OS</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><span class="logo">OS</span><span>מערכות הפעלה · תרגולים</span></a>
+    <span class="spacer"></span>
+    <a class="nav-link" href="index.html">כל התרגולים</a>
+    <button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+
+<section class="article-head">
+  <div class="container">
+    <div class="breadcrumb"><a href="index.html">תרגולים</a> ‹ תרגול 1</div>
+    <span class="pill">תרגול 1</span>
+    <h1>מבוא למערכות הפעלה · System Calls · לינוקס</h1>
+    <p class="lead">מה תפקידה של מערכת ההפעלה, איך מחשב פועל לפי ארכיטקטורת פון נוימן, רמות הפריווילגיה, מהי קריאת מערכת, ופקודות לינוקס שימושיות כולל הרשאות וקבוצות.</p>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>בתרגול הזה</h4>
+    <ul>
+      <li><a href="#os">מערכת ההפעלה</a></li>
+      <li><a href="#vonneumann">ארכיטקטורת פון נוימן</a></li>
+      <li><a href="#rings">רמות פריווילגיה ו-PSW</a></li>
+      <li><a href="#syscall">System Call</a></li>
+      <li><a href="#linux">לינוקס ופקודות</a></li>
+      <li><a href="#perms">הרשאות, קבוצות ו-SetUID</a></li>
+      <li><a href="#story">סיפור סוף התרגול</a></li>
+    </ul>
+  </aside>
+
+  <article class="content">
+
+    <h2 id="os">מערכת ההפעלה</h2>
+    <p>מערכת ההפעלה היא <strong>תוכנת מחשב</strong> שתפקידה העיקרי לשמש כמתווכת בין המשתמש לחומרה. היא נותנת שירות לתוכניות ולמשתמשים, מנהלת את הרצת שאר התוכניות, ומנהלת את המשאבים (זיכרון, דיסק, מעבד וכו').</p>
+
+    <div class="def-grid">
+      <div class="def"><span class="term">ניהול זיכרון</span><p>הקצאה דינאמית של זיכרון (דברים משתנים כל הזמן), החלטה אילו חלקים של תהליכים לטעון לזיכרון ואילו לא, שמירת מידע על כל פרוסס, וניהול זיכרון וירטואלי (תוך שימוש גם בהארד דיסק).</p></div>
+      <div class="def"><span class="term">ניהול קבצים</span><p>קבצים הם יחידת אחסון לוגית של מידע. המערכת מנהלת הרשאות גישה, יוצרת היררכיה באמצעות תיקיות, ומטפלת בכל הפעולות — יצירה, קריאה, מחיקה וכו'.</p></div>
+      <div class="def"><span class="term">אחריות כלפי החומרה</span><p>הגנה על החומרה באמצעות מתן גישה מבוקרת מאוד. שני מצבי ריצה — <span class="en">user mode</span> ו-<span class="en">kernel mode</span> — ומנגנון פסיקות (<span class="en">interrupt</span>) המאפשר למערכת להשתלט על המעבד. בנוסף — ייעול מקסימלי של החומרה.</p></div>
+    </div>
+
+    <div class="note tip">
+      <div class="note-title">💡 למה בכלל צריך מערכת הפעלה?</div>
+      <p>אם היינו יודעים שרק תוכנית אחת רצה, או שאין בה שגיאות מראש — לא היינו צריכים מערכת הפעלה. אבל אלו לא הנחות לגיטימיות כיום, ולכן נדרשת שכבת תיווך והגנה.</p>
+    </div>
+
+    <h2 id="vonneumann">ארכיטקטורת פון נוימן — איך מחשב פועל?</h2>
+    <ul>
+      <li><strong>מעבד (CPU):</strong> אחראי לביצוע התוכנית — מבצע את פקודות שפת המכונה המאוכסנות בזיכרון. בכל רגע נתון רצה תוכנית אחת בלבד על המעבד.</li>
+      <li><strong>זיכרון:</strong> מאחסן את הפקודות לביצוע ואת הנתונים שהתוכנית משתמשת בהם.</li>
+      <li><strong>רגיסטרים:</strong> תאי אחסון נתונים שעליהם מתבצעות כל הפעולות האריתמטיות והלוגיות.</li>
+    </ul>
+    <p>האם המעבד יבצע כל פקודה? תלוי ב<strong>רמת הפריווילגיה</strong> (Rings) של הפקודה הנוכחית. כשקוד מבקש לגשת לאזור בזיכרון, החומרה מאשרת לפי סוג הפקודה ולפי ה-privilege של המבקש: לכל אזור מוגדר <span class="en">DPL</span>, והגישה מותרת רק אם הפריווילגיה של המבקש קטנה מה-DPL.</p>
+    <p><strong>פסיקה (interrupt)</strong> גורמת למעבד להפסיק את ריצתו, והשליטה עוברת למערכת ההפעלה. היא נשלחת כשרוצים לבצע קריאת מערכת, כשיש שגיאה וכו'.</p>
+
+    <h2 id="rings">רמות פריווילגיה ו-PSW</h2>
+    <p>הדגמה: אם הקרנל רוצה להריץ <span class="en">word</span>, ה-PL של הקרנל הוא 0 ושל word הוא 3. כיוון ש-<span class="en">3 &gt; 0</span> — הוא יכול לבצע.</p>
+    <div class="note info">
+      <div class="note-title">📌 חשוב לזכור</div>
+      <p>ככל שה-<span class="en">Ring</span> קטן יותר — רמת ההרשאה גבוהה יותר. Ring 0 = הקרנל (הכי חזק), Ring 3 = אפליקציות משתמש.</p>
+    </div>
+    <p><strong>PSW</strong> הוא רגיסטר שאחד מתפקידיו להבחין אם אנחנו ב-<span class="en">kernel mode</span> או <span class="en">user mode</span>. אם ביט מסוים באוגר זה דולק — התהליך שרץ חסום מפעולות מסוימות (IO, גישה לכל הזיכרון, עדכון טבלאות/רגיסטרים). אם הביט כבוי — יש גישה להכל.</p>
+
+    <h2 id="syscall">System Call</h2>
+    <p>איך תהליך בעל privilege גבוה (Ring 3) יכול לבצע פעולות שדורשות privilege נמוך? באמצעות <strong>קריאת מערכת</strong>: מבקשים ממערכת ההפעלה שתסייע, היא מטפלת בבקשה ומחזירה את הנתונים למבקש.</p>
+    <p>בשפת C נשתמש ב-wrappers של הספרייה הסטנדרטית. לדוגמה, הדפסה ישירה ל-stdout דרך קריאת המערכת <code class="inline">write</code> (במקום <code class="inline">printf</code> שמשתמש בבאפר):</p>
+
+    <div class="code-wrap">
+      <div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">hello_syscall.c</span></div>
+<pre><code class="language-c">#include &lt;unistd.h&gt;   /* write, STDOUT_FILENO */
+#include &lt;string.h&gt;   /* strlen */
+
+int main(void) {
+    const char *msg = "Hello, OS!\n";
+
+    /* קריאת מערכת ישירה: כתיבה לערוץ הפלט הסטנדרטי (fd = 1)
+       write(int fd, const void *buf, size_t count); */
+    write(STDOUT_FILENO, msg, strlen(msg));
+
+    return 0;
+}</code></pre>
+    </div>
+    <p><strong>הסבר:</strong> כאן אנו פונים ישירות לקרנל. <code class="inline">STDOUT_FILENO</code> שווה 1, <code class="inline">msg</code> הוא מצביע לבאפר, ו-<code class="inline">strlen(msg)</code> הוא מספר הבתים לכתיבה. <strong>הקלט</strong> שמועבר לקרנל: מספר ה-fd, מצביע לטקסט, ואורך. הפלט שיודפס למסך: <code class="inline">Hello, OS!</code>.</p>
+
+    <h2 id="linux">לינוקס ופקודות שימושיות</h2>
+    <p>לינוקס היא מערכת הפעלה בהשראת Unix — חופשית, חינמית ובגישת <strong>Open Source</strong>. הפרויקט החל ב-1991 ע"י סטודנט, ומפותח בשיתוף אלפי מתכנתים. היא רצה על כמעט כל מעבד, מאפשרת מספר משתמשים במקביל ותומכת בריבוי תהליכים.</p>
+
+    <h3>man — דפי הסבר</h3>
+    <p>פקודה להצגת תיעוד על פקודות המערכת. הדפים מחולקים לסקשנים (סה"כ 9):</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>סקשן</th><th>תיאור</th><th>דוגמה</th></tr>
+        <tr><td><code>1</code> — User commands</td><td>פקודות משתמש רגילות</td><td><code>ls</code>, <code>cd</code></td></tr>
+        <tr><td><code>2</code> — System calls</td><td>רשימת קריאות המערכת</td><td><code>open</code>, <code>fork</code></td></tr>
+        <tr><td><code>3</code> — C library functions</td><td>פונקציות ספרייה סטנדרטיות</td><td><code>printf</code>, <code>scanf</code></td></tr>
+      </table>
+    </div>
+    <div class="code-wrap">
+      <div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">man ls            # דף ההסבר של ls — אפשר לראות מה עושים דגלים כמו -a
+man 2 open        # מבקש במפורש את סקשן 2 (קריאת המערכת open)
+man -k "copy"     # חיפוש לפי נושא במאגר המדריכים (לא זוכרים את שם הפקודה)</code></pre>
+    </div>
+
+    <h3>ניווט וניהול קבצים</h3>
+    <div class="code-wrap">
+      <div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">ls            # מדפיס תוכן הספרייה הנוכחית
+ls -al        # כולל קבצים נסתרים + פלט מורחב עם נתונים נוספים
+pwd           # מדפיס את נתיב הספרייה הנוכחית
+
+cd ..         # מעבר לספרייה שמכילה את הנוכחית
+cd -          # חזרה לספרייה הקודמת שהיינו בה
+cd ~          # מעבר לספריית הבית
+
+mkdir myDir   # יצירת ספרייה חדשה
+rmdir myDir   # מחיקת ספרייה (חייבת להיות ריקה! אחרת שגיאה)
+
+mv myfile backups/      # העברת קובץ אל הספרייה backups
+cp myfile backup/       # העתקת קובץ
+cp *.txt /home/op/txts  # העתקת כל קובץ עם סיומת txt לתוך הספרייה txts
+
+cat myfile              # משרשר ומדפיס תוכן קובץ למסך
+cat myfile > yourfile   # מדפיס קובץ אל תוך קובץ אחר</code></pre>
+    </div>
+
+    <h3>קימפול עם gcc</h3>
+    <div class="code-wrap">
+      <div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">gcc myprog.c            # קובץ ההרצה שייווצר יהיה a.out
+gcc myprog.c -o myprog  # קביעת שם קובץ ההרצה בעצמנו
+./myprog                # הרצה</code></pre>
+    </div>
+
+    <h2 id="perms">הרשאות, אבטחה וקבוצות ב-Linux</h2>
+    <p>לינוקס היא מערכת <strong>Multi-user</strong> — כמה משתמשים יכולים להיות מחוברים במקביל. לכל משתמש <span class="en">userID</span> ייחודי. הפקודה <code class="inline">who</code> מציגה מי מחובר כרגע. פרטי המשתמשים נשמרים בקובץ <code class="inline">/etc/passwd</code> — כל שורה מתארת משתמש אחד, מחולקת ל-7 שדות מופרדים בנקודתיים (שם משתמש, סיסמה — מסומנת ב-x ושמורה בקובץ אחר מאובטח, USERID, GROUPID וכו').</p>
+
+    <h3>קבוצות</h3>
+    <p>כל משתמש יכול להשתייך למספר קבוצות (יש לו קבוצת ברירת מחדל). הקובץ <code class="inline">/etc/group</code> מכיל את כל הקבוצות. <strong>למה קבוצות?</strong> במקום לתת הרשאות פר-משתמש, המערכת נותנת פר-קבוצה — וכל קבוצה מקבלת "מפתח" למשאבים מסוימים.</p>
+    <div class="code-wrap">
+      <div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">groups guy          # אילו קבוצות שייכות למשתמש guy
+newgrp developers   # החלפת קבוצת ברירת המחדל הנוכחית</code></pre>
+    </div>
+
+    <h3>שלוש הרשאות, שלוש ישויות</h3>
+    <p>3 סוגי הרשאות: <strong>read=4</strong>, <strong>write=2</strong>, <strong>execute=1</strong>. הרשאה 7 = 4+2+1 (קריאה, כתיבה וביצוע). ההרשאות מתייחסות לשלוש ישויות:</p>
+    <ul>
+      <li><strong>User</strong> — בעל הקובץ. המשתמש שיצר אותו, בעל שליטה מלאה. רק הוא (ו-root) יכול לשנות הרשאות.</li>
+      <li><strong>Group</strong> — הקבוצה המשויכת לקובץ; כל חבר בה מקבל את ההרשאות שהוגדרו.</li>
+      <li><strong>Other</strong> — כל היתר. כאן ההרשאות הכי מצומצמות.</li>
+    </ul>
+    <div class="code-wrap">
+      <div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash"># מבנה: chmod [special][user][group][other] file
+chmod 777 myfile    # כל מי שנוגע יכול לקרוא, לכתוב ולהריץ (rwxrwxrwx)
+chmod 644 myfile    # user: rw- , group: r-- , other: r--</code></pre>
+    </div>
+
+    <div class="note warn">
+      <div class="note-title">⚠️ umask — מסכת ההרשאות</div>
+      <p>כשתוכנה יוצרת קובץ חדש, ה-<strong>umask</strong> מגביל אוטומטית את הרשאותיו כדי למנוע הרשאות רחבות מדי. הפקודה <code class="inline">umask</code> מחזירה את המסכה של התהליך שהריץ אותה.</p>
+    </div>
+
+    <h3>SetUID — איך מעדכנים סיסמה?</h3>
+    <p>כדי לשנות סיסמה צריך לכתוב לקובץ <code class="inline">/etc/passwd</code> — שנמצא בבעלות root ואין למשתמש רגיל הרשאת כתיבה אליו. אז איך הסיסמה מתעדכנת? באמצעות הרשאת <strong>SetUID</strong> (האות <code class="inline">s</code> בהרשאות): כל מי שיש לו הרשאת גישה על הקובץ יריץ את התוכנה <strong>לא עם ההרשאות שלו, אלא עם ההרשאות של יוצר התוכנה</strong> (כאן — root). זה מאפשר לקבל כוחות root לזמן קצר שהפקודה רצה.</p>
+    <div class="code-wrap">
+      <div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash"># ספרה רביעית מוסיפים לפני שלוש הרגילות:
+#   4 → setuid (משתמש) | 2 → setgid (קבוצה) | 6 → שניהם
+chmod 4755 passwd_tool   # מפעיל את ביט ה-SetUID (s) על הקובץ</code></pre>
+    </div>
+
+    <h2 id="story">🎁 סיפור סוף התרגול</h2>
+    <div class="story">
+      <div class="story-tag">📖 תרגול 1 — מחיקה של חברה שלמה בפקודה אחת</div>
+      <p>ב-2015, מרקו מרסאלה פרסם בפורום טכני שהוא בטעות הריץ פקודת <code class="inline">rm -rf</code> עם הרחבת משתנה שגויה על שרתי חברת האחסון שלו — ומחק את כל הנתונים של 1,535 אתרים, כולל הגיבויים שהיו מעוגנים לאותה מערכת קבצים. העסק נהרס בפקודה אחת.</p>
+      <p>זו הסיבה שחשוב להבין איך ה-shell מרחיב משתנים, איך <code class="inline">rm</code> עובד ברמת ה-syscall, ולמה rm לא באמת מוחק נתונים (הוא מבצע <span class="en">unlink</span> ל-inode). להכיר את מערכת ההפעלה זה להבין מה פקודה <em>באמת</em> עושה — לא מה שאתם חושבים שהיא עושה.</p>
+      <p class="moral">המסר: פקודה אחת שגויה יכולה למחוק חברה שלמה.</p>
+    </div>
+
+  </article>
+</div>
+
+<nav class="pager">
+  <a class="prev disabled" href="#"><span class="dir">→ הקודם</span><div class="ttl">—</div></a>
+  <a class="next" href="tirgul2.html"><span class="dir">הבא ←</span><div class="ttl">תרגול 2 · Bash</div></a>
+</nav>
+
+<footer class="footer">סיכום מערכות הפעלה · © גיא יער-און</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

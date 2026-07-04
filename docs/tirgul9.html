@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>תרגול 9 — Links &amp; Inodes | מערכות הפעלה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b54e6'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='white' font-family='monospace'>OS</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><span class="logo">OS</span><span>מערכות הפעלה · תרגולים</span></a>
+    <span class="spacer"></span>
+    <a class="nav-link" href="index.html">כל התרגולים</a>
+    <button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+
+<section class="article-head">
+  <div class="container">
+    <div class="breadcrumb"><a href="index.html">תרגולים</a> ‹ תרגול 9</div>
+    <span class="pill">תרגול 9</span>
+    <h1>קישורים, Inodes ומערכת הקבצים</h1>
+    <p class="lead">File Descriptor ו-Open File Description, פתיחת קבצים והרשאות, FHS ו-inode, מבנה התיקייה, Hard Link מול Symbolic Link, קישור שבור, ומשפחת stat.</p>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>בתרגול הזה</h4>
+    <ul>
+      <li><a href="#fd">File Descriptor</a></li>
+      <li><a href="#ofd">Open File Description</a></li>
+      <li><a href="#open">open + הרשאות</a></li>
+      <li><a href="#access">access</a></li>
+      <li><a href="#fhs">FHS &amp; inode</a></li>
+      <li><a href="#dir">מבנה התיקייה</a></li>
+      <li><a href="#hard">Hard Link</a></li>
+      <li><a href="#soft">Symbolic Link</a></li>
+      <li><a href="#stat">Stat</a></li>
+      <li><a href="#story">סיפור סוף התרגול</a></li>
+    </ul>
+  </aside>
+
+  <article class="content">
+
+    <h2 id="fd">File Descriptor</h2>
+    <p>בלינוקס "הכל הוא קובץ". כשמערכת ההפעלה רוצה לתת לתוכנית גישה — היא לא נותנת לגעת בחומרה ישירות, אלא מביאה "כרטיס": <strong>FD</strong>. לכל תהליך טבלה פרטית משלו שמנוהלת ע"י ה-OS; FD הוא מספר שלם חיובי שמייצג שורה בטבלה. בכל פתיחת תהליך נפתחים שלושה ערוצים ראשוניים (IN/OUT/ERR), ולכן קבצים נוספים יקבלו FD מ-3 ומעלה.</p>
+
+    <h2 id="ofd">Open File Description</h2>
+    <p>מבנה בזיכרון מערכת ההפעלה שמייצג <strong>מופע ספציפי של קובץ פתוח</strong> — לא את הקובץ עצמו שבדיסק, אלא את מצב העבודה הנוכחי מולו. שומר:</p>
+    <ul>
+      <li>המיקום הנוכחי בקובץ (offset).</li>
+      <li>האם הקובץ לקריאה / כתיבה / קריאה וכתיבה.</li>
+      <li>דגלים והערות נוספות.</li>
+      <li>מצביע ל-inode עבור הקובץ.</li>
+    </ul>
+    <div class="note info"><div class="note-title">📌 שיתוף offset</div><p>אם זוג FD מצביעים לאותו משאב בטבלת הקבצים הפתוחים (למשל אחרי <code class="inline">dup2()</code>) — הם חולקים את אותו <strong>file offset</strong> ואת אותם דגלי גישה.</p></div>
+
+    <h2 id="open">קריאת המערכת open + הרשאות</h2>
+    <div class="sig"><span class="c-ty">int</span> <span class="c-fn">open</span>(<span class="c-kw">const</span> <span class="c-ty">char</span> *pathname, <span class="c-ty">int</span> flags);
+<span class="c-ty">int</span> <span class="c-fn">open</span>(<span class="c-kw">const</span> <span class="c-ty">char</span> *pathname, <span class="c-ty">int</span> flags, <span class="c-ty">mode_t</span> mode);</div>
+    <p>הדגלים: <code class="inline">O_RDONLY</code>, <code class="inline">O_WRONLY</code>, <code class="inline">O_RDWR</code>, <code class="inline">O_CREAT</code>, <code class="inline">O_EXCL</code>, <code class="inline">O_TRUNC</code>, <code class="inline">O_APPEND</code>.</p>
+    <div class="note warn"><div class="note-title">⚠️ אל תשכחו את mode</div><p>אם יוצרים קובץ עם <code class="inline">O_CREAT</code> בלי להעביר <code class="inline">mode</code> — התוכנית תתקמפל, אבל הקובץ ייווצר עם הרשאות אקראיות ממה שהיה בסטאק (עלולים לנעול את עצמכם מחוץ לקובץ).</p></div>
+    <div class="table-wrap"><table>
+      <tr><th>קבוצה</th><th>Read</th><th>Write</th><th>Execute</th><th>שילוב מלא</th></tr>
+      <tr><td>User (Owner)</td><td><code>S_IRUSR</code> (400)</td><td><code>S_IWUSR</code> (200)</td><td><code>S_IXUSR</code> (100)</td><td><code>S_IRWXU</code> (700)</td></tr>
+      <tr><td>Group</td><td><code>S_IRGRP</code> (040)</td><td><code>S_IWGRP</code> (020)</td><td><code>S_IXGRP</code> (010)</td><td><code>S_IRWXG</code> (070)</td></tr>
+      <tr><td>Others</td><td><code>S_IROTH</code> (004)</td><td><code>S_IWOTH</code> (002)</td><td><code>S_IXOTH</code> (001)</td><td><code>S_IRWXO</code> (007)</td></tr>
+    </table></div>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">create_644.c</span></div>
+<pre><code class="language-c">/* קובץ שלבעליו מותר לקרוא ולכתוב, ולכל השאר רק לקרוא (0644) */
+int fd = open("data.txt", O_CREAT | O_WRONLY,
+              S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);</code></pre></div>
+
+    <h2 id="access">הפונקציה access</h2>
+    <div class="sig">#include &lt;unistd.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">access</span>(<span class="c-ty">char</span>* pathname, <span class="c-ty">int</span> mode);</div>
+    <p>בודקת אם לתהליך הקורא יש גישה לקובץ. <code class="inline">mode</code>:</p>
+    <ul>
+      <li><code class="inline">R_OK</code> — גישת קריאה?</li>
+      <li><code class="inline">W_OK</code> — גישת כתיבה?</li>
+      <li><code class="inline">X_OK</code> — גישת הרצה?</li>
+      <li><code class="inline">F_OK</code> — האם הקובץ קיים?</li>
+    </ul>
+    <p>יש גישה → 0, אחרת −1.</p>
+
+    <h2 id="fhs">FHS &amp; Inode</h2>
+    <p>תקן ה-<strong>FHS</strong> (File Hierarchy Standard) מגדיר את מבנה התיקיות והתוכן שלהן בלינוקס. כל הקבצים מופיעים תחת השורש <code class="inline">/</code>, גם אם הם מאוחסנים בהתקן (פיזי/וירטואלי) שונה.</p>
+    <p>לכל File system יש טבלה של <strong>inodes</strong> (Index Node) — מבנה נתונים בסיסי שמכיל את כל המטה-דאטה על הקובץ, <strong>פרט לשם שלו ולתוכן הממשי</strong>: גודל הקובץ, מס' ה-USER וה-GROUP, רמת גישה ועוד.</p>
+
+    <h2 id="dir">מבנה התיקייה</h2>
+    <p>תיקייה היא קובץ לכל דבר — ההבדל היחיד הוא שתוכנה הוא <strong>טבלה של מיפויים</strong>. כל שורה מייצגת קובץ/תת-קובץ, ומורכבת מ:</p>
+    <ol>
+      <li>שם הקובץ (מחרוזת טקסט).</li>
+      <li>מספר ה-inode — מוביל ל-inode בטבלה הגלובלית.</li>
+    </ol>
+    <p>זוג כזה נקרא <strong>directory entry</strong> (או link). כשמבקשים לגשת לקובץ, המערכת פותחת את קובץ התיקייה, מחפשת את השם, שולפת את מספר ה-inode, ניגשת לטבלה הגלובלית, ומשם שולפת את השדה שמצביע פיזית לדיסק.</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">ls -i    # מציג את מספר ה-inode של כל קובץ/תיקייה</code></pre></div>
+
+    <h2 id="hard">Hard Link</h2>
+    <p>מצב שבו יש יותר מקובץ אחד שמצביע ל<strong>אותו מספר inode בדיוק</strong>. אין כאן "מקור" ו"העתק" — שני השמות שקולים לחלוטין, מובילים לאותו מבנה נתונים ולאותו מיקום פיזי בדיסק.</p>
+    <div class="sig"><span class="c-ty">int</span> <span class="c-fn">link</span>(<span class="c-kw">const</span> <span class="c-ty">char</span> *oldpath, <span class="c-kw">const</span> <span class="c-ty">char</span> *newpath);</div>
+    <p>מקבלת נתיב לקובץ קיים (שיש לו שם ו-inode) ושם חדש שיתווסף בטבלת התיקייה עבור אותו inode. 0 בהצלחה, −1 בכישלון.</p>
+    <div class="note warn"><div class="note-title">⚠️ מגבלות Hard Link</div>
+      <ul style="margin:6px 0 0">
+        <li>אי אפשר ליצור בין מחיצות שונות.</li>
+        <li>אי אפשר ליצור לתיקייה — מערכת הקבצים בנויה כעץ; קישור קשיח לתיקייה עלול ליצור לולאה אינסופית (תיקייה שמכילה קישור לאב שלה).</li>
+      </ul>
+    </div>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">echo A > file1.txt
+ln file1.txt file2.txt   # יוצר hard link — מונה הקישורים ל-inode = 2
+
+rm file1.txt             # המונה יורד מ-2 ל-1 → הקובץ עדיין חי!
+cat file2.txt            # → A   (התוכן נגיש דרך השם השני)</code></pre></div>
+    <p><strong>הסבר:</strong> rm מבצע unlink — מסיר שורה מהתיקייה ומפחית את מונה הקישורים. הקובץ נמחק פיזית רק כשהמונה מגיע ל-0.</p>
+
+    <h2 id="soft">Symbolic (soft) Link</h2>
+    <p>בניגוד ל-Hard Link — קובץ <strong>חדש ונפרד</strong> לחלוטין, עם inode משלו ובלוקים משלו. בתוכו מחרוזת טקסט שמכילה את <strong>הנתיב</strong> לקובץ המקורי.</p>
+    <div class="sig"><span class="c-ty">int</span> <span class="c-fn">symlink</span>(<span class="c-kw">const</span> <span class="c-ty">char</span> *oldpath, <span class="c-kw">const</span> <span class="c-ty">char</span> *newpath);</div>
+    <p>היתרונות על Hard Link: <strong>עובד בין מחיצות שונות</strong> (אין מצביע ל-inode פנימי, רק טקסט נתיב), ו<strong>מותר ליצור לתיקיות</strong>.</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">terminal</span></div>
+<pre><code class="language-bash">touch file1.txt
+ln -s file1.txt file2.txt   # soft link → file2.txt -> file1.txt
+readlink file2.txt          # מציג את הנתיב ששמור בתוך הקישור</code></pre></div>
+    <p><strong>איך הקרנל מתנהג כשפותחים soft link?</strong></p>
+    <ol>
+      <li>ב-<code class="inline">open()</code> על קישור סימבולי — המערכת פותחת את ה-inode של הקישור, רואה שתוכנו נתיב, ומפנה את עצמה אוטומטית לנתיב.</li>
+      <li><strong>פתרון לולאות:</strong> אם קישור מצביע על קישור אחר וכו' — המערכת עוקבת עד שתגיע לקובץ אמיתי. כדי למנוע לולאה אינסופית יש מגבלה של כ-40 מעברים, ואם עברנו אותה — open ייכשל.</li>
+      <li>בהגעה לקובץ היעד — שולפת את ה-inode האמיתי, פותחת ומחזירה fd.</li>
+    </ol>
+
+    <h3 id="broken">Broken / Dangling Link</h3>
+    <p>ה-Soft Link לא מכיר את מספר ה-inode של היעד — רק מחרוזת נתיב. אם הקובץ המקורי נמחק או זז — הקישור עדיין קיים, אך ניסיון לגשת אליו ייכשל (הנתיב לא נמצא). זה <strong>קישור שבור</strong> — הטרמינל מסמן אותו באדום.</p>
+
+    <h2 id="stat">Stat</h2>
+    <div class="sig">#include &lt;sys/stat.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">stat</span>(<span class="c-kw">const</span> <span class="c-ty">char</span>* path, <span class="c-kw">struct</span> <span class="c-ty">stat</span>* buf);
+<span class="c-ty">int</span> <span class="c-fn">lstat</span>(<span class="c-kw">const</span> <span class="c-ty">char</span>* path, <span class="c-kw">struct</span> <span class="c-ty">stat</span>* buf);  <span style="color:#7a85a3">// עבור soft link עצמו ולא היעד</span>
+<span class="c-ty">int</span> <span class="c-fn">fstat</span>(<span class="c-ty">int</span> fd, <span class="c-kw">struct</span> <span class="c-ty">stat</span>* buf);             <span style="color:#7a85a3">// עבור file descriptor</span></div>
+    <p>משפחת פונקציות ששולפת את ה-inode של הקובץ מהדיסק וממלאת מבנה נתונים. ערך מוחזר: 0 בהצלחה, −1 בכישלון.</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">stat_demo.c</span></div>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;sys/stat.h&gt;
+
+int main(int argc, char **argv) {
+    struct stat sb;
+    if (stat(argv[1], &amp;sb) == -1) {
+        perror("stat");
+        return 1;
+    }
+    printf("inode:  %lu\n", (unsigned long)sb.st_ino);
+    printf("size:   %ld bytes\n", (long)sb.st_size);
+    printf("links:  %lu\n", (unsigned long)sb.st_nlink);
+    return 0;
+}</code></pre></div>
+    <p><strong>הקלט:</strong> <code class="inline">argv[1]</code> — נתיב לקובץ. <strong>הפלט:</strong> מספר ה-inode, גודל הקובץ ומספר הקישורים הקשיחים אליו — כל אלו נשלפים מתוך ה-inode דרך <code class="inline">struct stat</code>.</p>
+
+    <h2 id="story">🎁 סיפור סוף התרגול</h2>
+    <div class="story">
+      <div class="story-tag">📖 תרגול 9 — Git, Hard Links ו-stat</div>
+      <p>הפקודה <code class="inline">git clone --local</code> פועלת מיידית כי Git אינו מעתיק את קבצי האובייקטים, אלא יוצר עבורם <strong>Hard Links</strong> — שתי רשומות ספרייה המצביעות לאותו inode. באופן דומה, היעילות של <code class="inline">git status</code> נובעת מ-<code class="inline">stat()</code>, שמאפשרת ל-Git להשוות רק את המטא-דאטה (גודל וזמני שינוי) מול האינדקס, בלי לקרוא את תוכן הקבצים.</p>
+      <p>מאחר שניהול ה-inodes מוגבל למערכת הקבצים המקומית, Hard Links אינם חוצים מחיצות — ולכן <code class="inline">mv</code> מיידי באותה מחיצה (שינוי רשומת ספרייה), אך הופך ל-Copy+Delete איטי בין מערכות קבצים שונות.</p>
+      <p class="moral">המסר: בחיים תצטרכו גם Soft Links — קשרים גמישים שמאפשרים לדלג בין עולמות; וגם Hard Links — חיבורים עמוקים ויציבים לשורש הדבר, שלא יישברו גם אם כל התפאורה מסביב תשתנה.</p>
+    </div>
+
+  </article>
+</div>
+
+<nav class="pager">
+  <a class="prev" href="tirgul8.html"><span class="dir">→ הקודם</span><div class="ttl">תרגול 8 · Signals ב'</div></a>
+  <a class="next" href="tirgul10.html"><span class="dir">הבא ←</span><div class="ttl">תרגול 10 · IPC · PIPE · FIFO</div></a>
+</nav>
+
+<footer class="footer">סיכום מערכות הפעלה · © גיא יער-און</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

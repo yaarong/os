@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>תרגול 11 — זיכרון וירטואלי &amp; Shared Memory | מערכות הפעלה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b54e6'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='white' font-family='monospace'>OS</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><span class="logo">OS</span><span>מערכות הפעלה · תרגולים</span></a>
+    <span class="spacer"></span>
+    <a class="nav-link" href="index.html">כל התרגולים</a>
+    <button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+
+<section class="article-head">
+  <div class="container">
+    <div class="breadcrumb"><a href="index.html">תרגולים</a> ‹ תרגול 11</div>
+    <span class="pill">תרגול 11</span>
+    <h1>זיכרון וירטואלי &amp; Shared Memory</h1>
+    <p class="lead">זיכרון פיזי מול וירטואלי, דפים ומסגרות, יתרונות ה-paging, וזיכרון משותף כפתרון IPC מהיר — ftok, shmget, shmat, shmdt ו-shmctl.</p>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>בתרגול הזה</h4>
+    <ul>
+      <li><a href="#phys">זיכרון פיזי</a></li>
+      <li><a href="#virt">זיכרון וירטואלי</a></li>
+      <li><a href="#why">למה צריך זאת?</a></li>
+      <li><a href="#pages">דפים ומסגרות</a></li>
+      <li><a href="#shm">Shared Memory</a></li>
+      <li><a href="#api">ftok · shmget · shmat</a></li>
+      <li><a href="#demo">דוגמה מלאה</a></li>
+      <li><a href="#shmctl">shmctl</a></li>
+      <li><a href="#story">סיפור סוף התרגול</a></li>
+    </ul>
+  </aside>
+
+  <article class="content">
+
+    <h2 id="phys">הזיכרון הפיזי</h2>
+    <p>זיכרון שנמצא בהתקנים הפיזיים של המחשב:</p>
+    <div class="def-grid">
+      <div class="def"><span class="term">RAM — ראשי</span><p>מאחסן את התוכנית לביצוע והנתונים שהיא משתמשת בהם. זיכרון <strong>נדיף</strong>.</p></div>
+      <div class="def"><span class="term">דיסק קשיח — משני</span><p>מאחסן כמות גדולה מאוד של נתונים. זיכרון <strong>שאינו נדיף</strong>.</p></div>
+    </div>
+
+    <h2 id="virt">הזיכרון הווירטואלי</h2>
+    <p>מרחב זיכרון מדומה שעומד לרשות תהליך — ויכול להיות <strong>גדול יותר</strong> מהזיכרון הפיזי הראשי. הוא ממופה בחלקו ל-RAM ובחלקו לזיכרון המשני. הקוד שמבוצע והנתונים הדרושים חייבים להיות ב-RAM בזמן הביצוע.</p>
+    <div class="note tip">
+      <div class="note-title">💡 אנלוגיה — שולחן וארון ספרים</div>
+      <p>ה-RAM הוא שולחן עם ספרים; הזיכרון המשני הוא ארון ספרים ענק. הזיכרון הווירטואלי מאפשר לעבוד כאילו השולחן ענק — גם כשהוא פיזית קטן:</p>
+      <ol style="margin:8px 0 0">
+        <li>המחשב אומר לכל תוכנה: "קחי מרחב זיכרון עצום, תעשי בו מה שתרצי". התוכנה לא יודעת שזה לא אמיתי.</li>
+        <li><strong>המיפוי:</strong> רק הדפים (PAGES) שהתוכנה באמת צריכה כעת מונחים על ה-RAM.</li>
+        <li>אם תוכנה צריכה מידע שבארון — המחשב מפנה מקום בשולחן (מחזיר לזיכרון המשני דף שלא בשימוש).</li>
+      </ol>
+    </div>
+
+    <h2 id="why">למה צריך זיכרון וירטואלי?</h2>
+    <ol>
+      <li><strong>הפרדה בין תהליכים:</strong> לכל תהליך מרחב וירטואלי משלו. המערכת מפרידה את מרחב הכתובות של כל תהליך — ולכן תהליך אחד לא יכול לפגוע בנתונים של אחר.</li>
+      <li><strong>הגדלת הזיכרון:</strong> בכל רגע רק חלק ממרחב הזיכרון של תהליך נמצא ב-RAM. מאפשר להריץ תהליכים שסך הזיכרון שלהם גדול מה-RAM (או תהליך בודד שמרחבו גדול מה-RAM).</li>
+    </ol>
+
+    <h2 id="pages">דפים ומסגרות</h2>
+    <ul>
+      <li>לכל תהליך מרחב זיכרון וירטואלי משלו, מתחיל לרוב בכתובת 0. ניתן לייצג עד 256TiB−1 כתובות.</li>
+      <li>המרחב מחולק ל<strong>דפים (pages)</strong> — קטעי זיכרון עוקבים בגודל קבוע (בד"כ 4KB, תלוי מערכת).</li>
+      <li>ה-RAM מחולק ל<strong>מסגרות (frames)</strong>, כל אחת בגודל דף.</li>
+      <li>דף שנמצא ב-RAM מקושר למסגרת כלשהי.</li>
+    </ul>
+
+    <h2 id="shm">Shared Memory</h2>
+    <p>נזכר ב-PIPES וב-FIFO: בכל קריאה/כתיבה יש <strong>context-switch</strong> למערכת ההפעלה. במקום זאת, ניתן להגדיר <strong>אזור זיכרון משותף</strong> לכמה תהליכים — <span class="en">IPC Shared Memory</span>. בפועל: ממפים את אותה המסגרת (frame) למספר דפים של תהליכים שונים.</p>
+    <p>יתרונות:</p>
+    <ol>
+      <li>מאפשר למספר תהליכים לגשת לאותו מקום בזיכרון ולחלוק מידע.</li>
+      <li>בניגוד ל-pipe — קריאה <strong>לא מרוקנת</strong> את הנתונים (כמו זיכרון רגיל).</li>
+      <li>כל התהליכים רואים את המידע שהשתנה.</li>
+      <li>מהיר בהרבה מ-pipes.</li>
+      <li>לא דורש קריאות מערכת בכל כתיבה/קריאה.</li>
+    </ol>
+
+    <h2 id="api">יצירת זיכרון משותף — שלבים</h2>
+    <h4>1. מפתח ייחודי — ftok</h4>
+    <div class="sig"><span class="c-ty">key_t</span> <span class="c-fn">ftok</span>(<span class="c-ty">char</span> *pathname, <span class="c-ty">char</span> proj_id);</div>
+    <p>הפרמטרים: שם קובץ קיים, ותו כלשהו שיזוהה עם המפתח.</p>
+
+    <h4>2. הקצאה — shmget</h4>
+    <div class="sig">#include &lt;sys/ipc.h&gt;
+#include &lt;sys/shm.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">shmget</span>(<span class="c-ty">key_t</span> key, <span class="c-ty">size_t</span> size, <span class="c-ty">int</span> shmflg);</div>
+    <p>מקצה אזור משותף (במפתח שאף אחד לא נתן עדיין) או מקבל מזהה של אזור קיים. <code class="inline">key</code> — מפתח (או <code class="inline">IPC_PRIVATE</code> למקום חדש), <code class="inline">size</code> — גודל בבתים, <code class="inline">shmflg</code> — דגלים והרשאות. מחזיר <strong>shmid</strong> (מזהה ייחודי) או −1.</p>
+
+    <h4>3. התחברות — shmat</h4>
+    <div class="sig">#include &lt;sys/types.h&gt;
+#include &lt;sys/shm.h&gt;
+<span class="c-kw">void</span> *<span class="c-fn">shmat</span>(<span class="c-ty">int</span> shmid, <span class="c-kw">const</span> <span class="c-kw">void</span> *shmaddr, <span class="c-ty">int</span> shmflg);</div>
+    <p>מקשרת את הזיכרון שהוקצה לתהליך (זה פיזית החץ בין טבלת הדפים לפריים). <code class="inline">shmaddr</code> — לרוב <code class="inline">NULL</code>. מחזירה כתובת במרחב הזיכרון של התהליך, או −1.</p>
+
+    <h4>4. ניתוק — shmdt</h4>
+    <div class="sig"><span class="c-ty">int</span> <span class="c-fn">shmdt</span>(<span class="c-kw">const</span> <span class="c-kw">void</span> *shmaddr);</div>
+    <p>מקבלת את הכתובת אליה ממופה הזיכרון המשותף, ומנתקת את הקשר בין התהליך לזיכרון.</p>
+
+    <h2 id="demo">דוגמה מלאה</h2>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">shared_mem.c</span></div>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;sys/ipc.h&gt;
+#include &lt;sys/shm.h&gt;
+
+int main(void) {
+    /* 1) מפתח ייחודי מתוך קובץ קיים + מזהה פרויקט */
+    key_t key = ftok("/tmp", 'A');
+
+    /* 2) הקצאת 1024 בתים של זיכרון משותף (יצירה אם לא קיים) */
+    int shmid = shmget(key, 1024, IPC_CREAT | 0666);
+
+    /* 3) התחברות — קבלת מצביע לזיכרון המשותף */
+    char *shm = (char *)shmat(shmid, NULL, 0);
+
+    /* כתיבה — כמו לזיכרון רגיל, בלי קריאת מערכת */
+    strcpy(shm, "Hello shared world!");
+    printf("Wrote: %s\n", shm);
+
+    /* 4) ניתוק בסיום השימוש */
+    shmdt(shm);
+
+    /* 5) מחיקת המקטע מהמערכת (אחרת יישאר גם אחרי סיום) */
+    shmctl(shmid, IPC_RMID, NULL);
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר משולב:</strong> <code class="inline">ftok</code> מייצר מפתח (<strong>קלט</strong>: נתיב <code class="inline">/tmp</code> ותו <code class="inline">'A'</code>) ששני תהליכים נפרדים יכולים לחשב בצורה זהה כדי לקבל את אותו אזור. <code class="inline">shmget</code> מקצה 1024 בתים ומחזיר <code class="inline">shmid</code>. <code class="inline">shmat</code> ממפה את האזור לכתובת בתהליך, ומאותו רגע כותבים/קוראים כמו זיכרון רגיל — <strong>ללא</strong> קריאות מערכת, ומכאן המהירות. בסיום מנתקים עם <code class="inline">shmdt</code> ומוחקים את המקטע עם <code class="inline">shmctl(IPC_RMID)</code>.</p>
+
+    <h2 id="shmctl">shmctl — מחיקה/עדכון</h2>
+    <div class="sig">#include &lt;sys/shm.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">shmctl</span>(<span class="c-ty">int</span> shmid, <span class="c-ty">int</span> cmd, <span class="c-kw">struct</span> <span class="c-ty">shmid_ds</span> *buf);</div>
+    <p>מאפשר פעולות על ה-shared memory: שליפה ועדכון של פרמטרים, ובקשה להשמדת השטח. פרמטרים:</p>
+    <ul>
+      <li><strong>shmid</strong> — מזהה האובייקט (מ-shmget).</li>
+      <li><strong>cmd</strong> — הפקודה:
+        <ul>
+          <li><code class="inline">IPC_STAT</code> — שליפת הסטטוס של ה-shared memory לתוך <code class="inline">buf</code>.</li>
+          <li><code class="inline">IPC_SET</code> — שינוי שדות מסוימים (uid/gid/mode) לפי <code class="inline">buf</code>.</li>
+          <li><code class="inline">IPC_RMID</code> — מחיקת המקטע. רק owner/creator או root יכולים.</li>
+        </ul>
+      </li>
+      <li><strong>buf</strong> — מבנה הנתונים אליו יוקרא / ממנו יילקח הסטטוס.</li>
+    </ul>
+    <p>ערך מוחזר: 0 בהצלחה, −1 בכישלון.</p>
+
+    <h2 id="story">🎁 סיפור סוף התרגול</h2>
+    <div class="story">
+      <div class="story-tag">📖 תרגול 11 — Chrome ו-Shared Memory</div>
+      <p>פתחו Chrome וגשו ל-<code class="inline">chrome://system</code> — תראו עשרות תהליכים. כל טאב רץ בתהליך נפרד (לביטחון ובידוד קריסות), אבל הם צריכים לחלוק נתונים. Chrome משתמש ב-shared memory בצורה נרחבת: תהליך ה-GPU חולק פריימים מרונדרים עם תהליכי הטאבים דרך buffers של shared memory, ונמנע מפעולות copy יקרות.</p>
+      <p>כשטאב אחד קורס, האחרים שורדים כי הם תהליכים נפרדים — אבל הם עדיין יכולים לתקשר ביעילות, כי shared memory לא דורש מעורבות קרנל בכל קריאה/כתיבה.</p>
+      <p class="moral">המסר: כמו בקוד, גם בחיים צריך לפעמים לבנות ערוצי תקשורת קבועים ומרחב ידע משותף ללא מתווכים. זה הסוד שמונע מהמערכות הכי מורכבות — ומאיתנו — לקרוס ולבזבז זמן מיותר.</p>
+    </div>
+
+  </article>
+</div>
+
+<nav class="pager">
+  <a class="prev" href="tirgul10.html"><span class="dir">→ הקודם</span><div class="ttl">תרגול 10 · IPC · PIPE · FIFO</div></a>
+  <a class="next" href="index.html"><span class="dir">סיום ←</span><div class="ttl">חזרה לכל התרגולים</div></a>
+</nav>
+
+<footer class="footer">סיכום מערכות הפעלה · © גיא יער-און</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

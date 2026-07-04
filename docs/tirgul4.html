@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>תרגול 4 — Threads &amp; Mutex | מערכות הפעלה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b54e6'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='white' font-family='monospace'>OS</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><span class="logo">OS</span><span>מערכות הפעלה · תרגולים</span></a>
+    <span class="spacer"></span>
+    <a class="nav-link" href="index.html">כל התרגולים</a>
+    <button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+
+<section class="article-head">
+  <div class="container">
+    <div class="breadcrumb"><a href="index.html">תרגולים</a> ‹ תרגול 4</div>
+    <span class="pill">תרגול 4</span>
+    <h1>חוטים (Threads) &amp; Mutex</h1>
+    <p class="lead">מהו חוט ומה הוא חולק עם התהליך, Process Descriptor, מימוש POSIX Threads ו-Thread Group בלינוקס, ה-API של pthread, התנהגות fork/exec בתוך חוט, ומנגנון ה-Mutex.</p>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>בתרגול הזה</h4>
+    <ul>
+      <li><a href="#threads">חוטים — Threads</a></li>
+      <li><a href="#adv">יתרונות החוטים</a></li>
+      <li><a href="#descriptor">Process Descriptor</a></li>
+      <li><a href="#posix">POSIX Threads &amp; TGID</a></li>
+      <li><a href="#api">pthread API</a></li>
+      <li><a href="#forkexec">fork &amp; exec בתוך חוט</a></li>
+      <li><a href="#mutex">Mutex</a></li>
+      <li><a href="#story">סיפור סוף התרגול</a></li>
+    </ul>
+  </aside>
+
+  <article class="content">
+
+    <h2 id="threads">חוטים — Threads</h2>
+    <p>חוט הוא <strong>יחידת ביצוע עצמאית שפועלת בתוך תהליך</strong> ("שורת עבודה"). בלינוקס תהליך אחד יכול לכלול מספר חוטים, שחולקים ביניהם את משאבי התהליך — בין היתר <span class="en">code, data, heap</span> ומשאבי מערכת.</p>
+    <p>למרות השיתוף, כל חוט הוא "הקשר ביצוע" נפרד. לכל חוט באופן בלעדי:</p>
+    <ol>
+      <li><strong>מחסנית</strong> — לניהול קריאות לפונקציות ומשתנים מקומיים.</li>
+      <li><strong>Program Counter</strong> — מצביע על הפקודה הבאה שהחוט אמור לבצע.</li>
+      <li><strong>סט רגיסטרים</strong> — המצב הנוכחי של המעבד עבור אותו חוט.</li>
+    </ol>
+
+    <h2 id="adv">יתרונות החוטים</h2>
+    <ol>
+      <li><strong>ביצוע חלקים בלתי-תלויים במשימה</strong> — הרצה בו-זמנית של חלקים שונים שאינם תלויים זה בזה.</li>
+      <li><strong>מקביליות על מעבדים שונים</strong> — הרצת מספר חוטים במקביל על מעבדים שונים, מה שמזרז את זמן הביצוע הכולל.</li>
+      <li><strong>שיפור ביצועים גם במעבד יחיד</strong> — בזמן שחוט אחד מבצע פעולה חוסמת (המתנה ל-IO מהדיסק), חוט אחר ממשיך לעבוד במקום שהמעבד יתבזבז על המתנה.</li>
+    </ol>
+    <div class="note tip"><div class="note-title">💡 חוט זול מתהליך</div><p>הוספת חוט זולה בהרבה מהוספת תהליך שלם — היא לא דורשת הקצאת זיכרון חדש או הרשאות חומרה, שכן הם משותפים לכל החוטים. עם זאת — השיתוף מחייב לתאם בין החוטים שניגשים לאותם משתנים, כדי למנוע שיבוש נתונים.</p></div>
+
+    <h2 id="descriptor">Process Descriptor</h2>
+    <p>בלינוקס, לכל תהליך קיים בקרנל מבנה נתונים שנקרא <strong>מתאר תהליך</strong> (process descriptor) — רשומה שמרכזת את כל המידע על התהליך:</p>
+    <ol>
+      <li>מצב התהליך (רץ / ממתין / סיים)</li>
+      <li>עדיפות התהליך (כמה זמן מעבד יקבל ביחס לאחרים)</li>
+      <li>מזהה התהליך — PID</li>
+      <li>מצביע לטבלת אזורי הזיכרון</li>
+      <li>מצביע לטבלת הקבצים הפתוחים</li>
+    </ol>
+
+    <h2 id="posix">POSIX Threads &amp; Thread Group</h2>
+    <p>התקן <strong>POSIX Threads</strong> דורש שכל החוטים של אותו תהליך יהיו מאוגדים יחד — קריאה ל-<code class="inline">getpid()</code> מכל חוט אמורה להחזיר את אותו ערך.</p>
+    <div class="note warn"><div class="note-title">⚠️ הקאץ' של לינוקס</div><p>בלינוקס היחס לכל חוט הוא כאל תהליך רגיל — לכל חוט מתאר משלו ובפרט PID משלו. אך התקן מצפה ש-PID יזהה את כל החוטים. לכן לינוקס משתמשת ב-<strong>Thread Group</strong>.</p></div>
+    <p>איך לינוקס מממשת זאת:</p>
+    <ul>
+      <li><strong>Thread_group</strong> — מתארי כל החוטים מקושרים פיזית למתאר ה-primary thread (החוט הראשון).</li>
+      <li><strong>Tgid</strong> (thread group id) — ה"שקר המוסכם": מכיל את ה-PID המשותף לכל החוטים בקבוצה. בפועל זהו ה-PID של החוט הראשון.</li>
+    </ul>
+    <div class="table-wrap"><table>
+      <tr><th></th><th>Thread A</th><th>Thread B</th><th>Thread C</th></tr>
+      <tr><td><strong>PPID</strong></td><td>2900</td><td>2900</td><td>2900</td></tr>
+      <tr><td><strong>TGID</strong> (←getpid)</td><td>3000</td><td>3000</td><td>3000</td></tr>
+      <tr><td><strong>TID</strong></td><td>3000</td><td>3001</td><td>3002</td></tr>
+    </table></div>
+    <p>לכן בלינוקס <code class="inline">getpid()</code> מחזירה את ה-TGID של החוט הקורא. פעולות על ה-PID המשותף מתורגמות לפעולה על קבוצת החוטים המתאימה.</p>
+
+    <h2 id="api">ה-API של pthread</h2>
+    <p>תחילה יש לבצע <code class="inline">#include &lt;pthread.h&gt;</code> ולקשר עם <code class="inline">-pthread</code>.</p>
+
+    <h3>pthread_create — יצירת חוט</h3>
+    <div class="sig"><span class="c-ty">int</span> <span class="c-fn">pthread_create</span>(
+    <span class="c-ty">pthread_t</span> *thread,            <span style="color:#7a85a3">// יישמר מזהה החוט החדש</span>
+    <span class="c-kw">const</span> <span class="c-ty">pthread_attr_t</span> *attr,  <span style="color:#7a85a3">// מאפיינים (לרוב NULL)</span>
+    <span class="c-kw">void</span> *(*start_func)(<span class="c-kw">void</span>*),  <span style="color:#7a85a3">// הפונקציה שהחוט יריץ</span>
+    <span class="c-kw">void</span> *arg);                     <span style="color:#7a85a3">// ארגומנט לפונקציה</span></div>
+    <p>יוצרת חוט חדש שרץ במקביל לחוט הקורא, בתוך אותו תהליך. <strong>פונקציה אסינכרונית</strong> — החוט המקורי ממשיך לשורה הבאה מבלי לחכות. מחזירה 0 בהצלחה, או קוד שגיאה חיובי בכישלון. דומה ל-fork, רק ש-fork משכפל תהליך — וכאן מוסיפים "פועל" ידנית לתהליך.</p>
+
+    <h3>pthread_self · join · cancel · exit</h3>
+    <div class="sig"><span class="c-ty">pthread_t</span> <span class="c-fn">pthread_self</span>(<span class="c-kw">void</span>);                       <span style="color:#7a85a3">// מזהה החוט הקורא</span>
+<span class="c-ty">int</span>  <span class="c-fn">pthread_join</span>(<span class="c-ty">pthread_t</span> th, <span class="c-kw">void</span> **thread_return); <span style="color:#7a85a3">// כמו wait לחוט</span>
+<span class="c-ty">int</span>  <span class="c-fn">pthread_cancel</span>(<span class="c-ty">pthread_t</span> thread);                <span style="color:#7a85a3">// בקשת ביטול</span>
+<span class="c-kw">void</span> <span class="c-fn">pthread_exit</span>(<span class="c-kw">void</span> *retval);                       <span style="color:#7a85a3">// סיום עצמי של החוט</span></div>
+    <ul>
+      <li><strong>pthread_join</strong> — החוט הקורא עוצר וממתין עד שהחוט <code class="inline">th</code> מסיים. ההמתנה משחררת את מידע הניהול של החוט; בלעדיה נשארות "שאריות" של חוטים מתים. ניתן להמתין לחוט מסוים <em>פעם אחת בלבד</em>, וכל חוט יכול להמתין לכל חוט אחר.</li>
+      <li><strong>pthread_cancel</strong> — שולחת <em>בקשה</em> לסיים חוט (לא פקודה חד-משמעית). החוט לא תמיד מת מיד — תלוי בנקודת ובמצב הביטול שהוגדר.</li>
+      <li><strong>pthread_exit</strong> — החוט מחליט על דעת עצמו לסיים. <code class="inline">retval</code> מצביע לערך שמי שיבצע join יקבל. אם ה-main קורא לה — הוא מסיים את עצמו אך <em>לא סוגר את התהליך</em>; שאר החוטים ימשיכו עד שהאחרון יסיים.</li>
+    </ul>
+
+    <h4>דוגמה משולבת: יצירת חוטים והמתנה</h4>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">threads_demo.c</span></div>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;pthread.h&gt;
+
+void *worker(void *arg) {
+    int id = *(int *)arg;
+    printf("Thread %d running\n", id);
+    return NULL;          /* ערך זה יוחזר למי שיעשה join */
+}
+
+int main(void) {
+    pthread_t t[3];
+    int ids[3] = {0, 1, 2};
+
+    for (int i = 0; i &lt; 3; i++)
+        pthread_create(&amp;t[i], NULL, worker, &amp;ids[i]);
+
+    for (int i = 0; i &lt; 3; i++)
+        pthread_join(t[i], NULL);   /* ממתינים שכל חוט יסיים */
+
+    printf("All threads done\n");
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר משולב:</strong> ה-main יוצר 3 חוטים, וכל אחד מקבל מצביע ל-<code class="inline">id</code> שלו כ-<strong>קלט</strong> (<code class="inline">arg</code>). כל חוט מריץ את <code class="inline">worker</code> ומדפיס את ה-id. לולאת ה-<code class="inline">join</code> מבטיחה שה-main ימתין לכל החוטים לפני שהוא ממשיך — בלעדיה ה-main היה עלול לסיים את התהליך לפני שהחוטים הספיקו לרוץ.</p>
+
+    <h4>סיום חוט — מתי?</h4>
+    <ol>
+      <li>חזרה מהפונקציה הראשית של החוט.</li>
+      <li>קריאה ל-<code class="inline">pthread_exit()</code> בתוך החוט.</li>
+      <li>קריאה ל-<code class="inline">exit()</code> ע"י חוט כלשהו בקבוצה — מסיימת את <strong>כל</strong> התהליך.</li>
+      <li>סיום טבעי של החוט הראשי.</li>
+      <li>הריגת החוט ע"י <code class="inline">pthread_cancel</code> מחוט אחר (או מעצמו).</li>
+    </ol>
+
+    <h2 id="forkexec">fork &amp; exec בתוך חוט</h2>
+    <div class="def-grid">
+      <div class="def"><span class="term"><span class="en">fork()</span> בתוך חוט</span><p>נוצר תהליך חדש שהוא בן של החוט הקורא. <strong>רק חוט אחד משתכפל</strong> לתהליך הבן (גם אם לתהליך המקורי היו עוד חוטים). חוט אחר בקבוצה יכול לבצע wait על תהליך הבן.</p></div>
+      <div class="def"><span class="term"><span class="en">exec()</span> בתוך חוט</span><p>תהליך דרסטי: ברגע שהקריאה מצליחה, המערכת <strong>מוחקת את כל שאר החוטים</strong> בתהליך מיד (ללא join). החוט שביצע את הקריאה הוא הניצול היחיד, והופך לחוט הראשי של התוכנית החדשה. כל מרחב הכתובות נמחק ונוצר מחדש.</p></div>
+    </div>
+
+    <h2 id="mutex">Mutex</h2>
+    <p>מנגנון סנכרון שמונע מכמה חוטים לגשת למשאב משותף בו-זמנית. עובד כמו <strong>מפתח יחיד לחדר</strong>: מי שמחזיק במפתח נכנס, וכל השאר מחכים בחוץ עד שהוא יצא ויחזיר את המפתח.</p>
+    <ul>
+      <li>משתנה פשוט שיכול להיות <strong>נעול</strong> או <strong>לא נעול</strong>.</li>
+      <li>מקיף קוד רגיש שניגש לנתונים משותפים — נועלים בכניסה, משחררים ביציאה.</li>
+      <li>לכל היותר חוט אחד מחזיק בו; חוט שינסה לנעול מנעול תפוס — נחסם.</li>
+      <li><strong>בעלות</strong>: רק החוט שנעל את המיוטקס מורשה לשחרר אותו.</li>
+    </ul>
+
+    <h3>אתחול וסוגי mutex</h3>
+    <div class="sig"><span class="c-ty">int</span> <span class="c-fn">pthread_mutex_init</span>(<span class="c-ty">pthread_mutex_t</span> *mutex,
+                       <span class="c-kw">const</span> <span class="c-ty">pthread_mutexattr_t</span> *attr);</div>
+    <div class="table-wrap"><table>
+      <tr><th>סוג</th><th>תיאור</th></tr>
+      <tr><td><code>PTHREAD_MUTEX_NORMAL</code></td><td>רגיל ומהיר — לא בודק טעויות (נעילה כפולה ע"י אותו חוט → DEADLOCK).</td></tr>
+      <tr><td><code>PTHREAD_MUTEX_RECURSIVE</code></td><td>רקורסיבי — מאפשר לאותו חוט לנעול מספר פעמים ברצף בלי להיחסם.</td></tr>
+      <tr><td><code>PTHREAD_MUTEX_ERRORCHECK</code></td><td>בודק שגיאות ומחזיר קוד שגיאה על פעולה לא חוקית (שחרור מנעול של אחר).</td></tr>
+      <tr><td><code>PTHREAD_MUTEX_DEFAULT</code></td><td>ברירת המחדל של המערכת (בלינוקס — מתנהג כמו NORMAL).</td></tr>
+    </table></div>
+    <div class="note warn"><div class="note-title">⚠️ אסור לאתחל פעמיים</div><p>אתחול מיוטקס שכבר אותחל → התנהגות לא מוגדרת. גם הריסת מנעול נעול/לא-מאותחל → התנהגות לא מוגדרת.</p></div>
+
+    <h3>פעולות על mutex</h3>
+    <div class="sig"><span class="c-ty">int</span> <span class="c-fn">pthread_mutex_lock</span>(<span class="c-ty">pthread_mutex_t</span> *mutex);     <span style="color:#7a85a3">// נעילה (חוסם עד שמתפנה)</span>
+<span class="c-ty">int</span> <span class="c-fn">pthread_mutex_trylock</span>(<span class="c-ty">pthread_mutex_t</span> *mutex);  <span style="color:#7a85a3">// ניסיון נעילה (לא חוסם)</span>
+<span class="c-ty">int</span> <span class="c-fn">pthread_mutex_unlock</span>(<span class="c-ty">pthread_mutex_t</span> *mutex);   <span style="color:#7a85a3">// שחרור</span>
+<span class="c-ty">int</span> <span class="c-fn">pthread_mutex_destroy</span>(<span class="c-ty">pthread_mutex_t</span> *mutex);  <span style="color:#7a85a3">// הריסה</span></div>
+
+    <h4>דוגמה: הגנה על מונה משותף</h4>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">mutex_counter.c</span></div>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;pthread.h&gt;
+
+#define N 1000000
+long counter = 0;
+pthread_mutex_t lock;
+
+void *inc(void *arg) {
+    for (int i = 0; i &lt; N; i++) {
+        pthread_mutex_lock(&amp;lock);     /* כניסה לקטע קריטי */
+        counter++;                      /* משאב משותף */
+        pthread_mutex_unlock(&amp;lock);   /* יציאה */
+    }
+    return NULL;
+}
+
+int main(void) {
+    pthread_t a, b;
+    pthread_mutex_init(&amp;lock, NULL);
+
+    pthread_create(&amp;a, NULL, inc, NULL);
+    pthread_create(&amp;b, NULL, inc, NULL);
+    pthread_join(a, NULL);
+    pthread_join(b, NULL);
+
+    pthread_mutex_destroy(&amp;lock);
+    printf("counter = %ld\n", counter);  /* תמיד 2000000 */
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר משולב:</strong> שני חוטים מגדילים את <code class="inline">counter</code> מיליון פעמים כל אחד. ללא המיוטקס, <code class="inline">counter++</code> (שהוא קריאה→הגדלה→כתיבה) היה נתון ל-race condition, והתוצאה הסופית הייתה נמוכה מ-2,000,000. עם <code class="inline">lock/unlock</code> — רק חוט אחד נמצא בקטע הקריטי בכל רגע, ולכן התוצאה <strong>תמיד</strong> נכונה.</p>
+
+    <h2 id="story">🎁 סיפור סוף התרגול</h2>
+    <div class="story">
+      <div class="story-tag">📖 תרגול 4 — Therac-25</div>
+      <p>בין 1985 ל-1987, מכונת ההקרנות Therac-25 העבירה מנות קרינה מסיביות לפחות ל-6 מטופלים — חלקם קיבלו מאות מונים מהמינון המתוכנן. שלושה מטופלים מתו. הסיבה? <strong>Race Condition</strong>. לתוכנה היו שגרות מקבילות שחלקו משתנה בלי סנכרון נכון (בלי mutex!).</p>
+      <p>אם מפעיל הקליד מהר מספיק במהלך חלון של 8 שניות, התוכנה נכנסה למצב לא עקבי — הפעילה את הקרן בעוצמה מלאה בלי מפזר הבטיחות. אותו באג התקיים בדגם הקודם (Therac-20), אבל נעילות חומרה הסתירו אותו. כשהוחלפו בבדיקות תוכנה בלבד, ה-race condition הפך קטלני.</p>
+      <p class="moral">המסר: שלושה אנשים מתו בגלל mutex חסר. המושגים שלמדתם הם לא אקדמיים — הם מצילים חיים.</p>
+    </div>
+
+  </article>
+</div>
+
+<nav class="pager">
+  <a class="prev" href="tirgul3.html"><span class="dir">→ הקודם</span><div class="ttl">תרגול 3 · fork/exec/exit</div></a>
+  <a class="next" href="tirgul5.html"><span class="dir">הבא ←</span><div class="ttl">תרגול 5 · קבצים</div></a>
+</nav>
+
+<footer class="footer">סיכום מערכות הפעלה · © גיא יער-און</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

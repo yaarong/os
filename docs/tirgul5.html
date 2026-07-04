@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>תרגול 5 — קבצים &amp; System Calls | מערכות הפעלה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b54e6'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='white' font-family='monospace'>OS</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><span class="logo">OS</span><span>מערכות הפעלה · תרגולים</span></a>
+    <span class="spacer"></span>
+    <a class="nav-link" href="index.html">כל התרגולים</a>
+    <button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+
+<section class="article-head">
+  <div class="container">
+    <div class="breadcrumb"><a href="index.html">תרגולים</a> ‹ תרגול 5</div>
+    <span class="pill">תרגול 5</span>
+    <h1>קבצים — קריאות מערכת</h1>
+    <p class="lead">פתיחת קבצים עם open, ניהול תיקיות, read/write/close, שכפול fd עם dup/dup2, ניתוב I/O, מיקום בקובץ עם lseek, טיפול בשגיאות עם errno, ובאפרינג מול כתיבה פיזית.</p>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>בתרגול הזה</h4>
+    <ul>
+      <li><a href="#open">open()</a></li>
+      <li><a href="#dir">ניהול תיקיות</a></li>
+      <li><a href="#rwc">read · write · close</a></li>
+      <li><a href="#dup">משפחת dup</a></li>
+      <li><a href="#redir">I/O Redirection</a></li>
+      <li><a href="#lseek">lseek</a></li>
+      <li><a href="#chmod">chmod</a></li>
+      <li><a href="#errno">errno · perror</a></li>
+      <li><a href="#buffer">באפרינג ו-fsync</a></li>
+      <li><a href="#story">סיפור סוף התרגול</a></li>
+    </ul>
+  </aside>
+
+  <article class="content">
+
+    <h2 id="open">קריאת המערכת open()</h2>
+    <div class="sig">#include &lt;sys/stat.h&gt;
+#include &lt;fcntl.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">open</span>(<span class="c-kw">const</span> <span class="c-ty">char</span> *pathname, <span class="c-ty">int</span> flags);</div>
+    <p>הפרמטר <code class="inline">flags</code> קובע את אופן הפתיחה:</p>
+    <div class="table-wrap"><table>
+      <tr><th>דגל</th><th>משמעות</th></tr>
+      <tr><td><code>O_RDONLY</code></td><td>קריאה בלבד</td></tr>
+      <tr><td><code>O_WRONLY</code></td><td>כתיבה בלבד</td></tr>
+      <tr><td><code>O_RDWR</code></td><td>קריאה וכתיבה</td></tr>
+      <tr><td><code>O_CREAT</code></td><td>יצירת הקובץ אם אינו קיים</td></tr>
+      <tr><td><code>O_EXCL</code></td><td>גורם ל-open להיכשל אם הקובץ כבר קיים</td></tr>
+      <tr><td><code>O_TRUNC</code></td><td>קיצוץ גודל הקובץ לאפס</td></tr>
+      <tr><td><code>O_APPEND</code></td><td>הכתיבה תהיה לסוף הקובץ (לא דורסים)</td></tr>
+    </table></div>
+    <p>הצלחה → <code class="inline">fd</code>, אחרת <code class="inline">-1</code>.</p>
+
+    <h2 id="dir">ניהול תיקיות</h2>
+    <p>נעבור מרמת הקובץ הבודד לקריאת תוכן של תיקייה שלמה.</p>
+    <div class="sig">#include &lt;dirent.h&gt;
+<span class="c-ty">DIR*</span>            <span class="c-fn">opendir</span>(<span class="c-kw">const</span> <span class="c-ty">char</span>* pathname);  <span style="color:#7a85a3">// מצביע ל-DIR או NULL</span>
+<span class="c-ty">struct dirent*</span>  <span class="c-fn">readdir</span>(<span class="c-ty">DIR*</span> dp);             <span style="color:#7a85a3">// רשומה אחת בכל קריאה</span>
+<span class="c-ty">int</span>             <span class="c-fn">closedir</span>(<span class="c-ty">DIR*</span> dp);</div>
+    <p><code class="inline">opendir</code> מחזירה מצביע ל-stream של מידע, שבעת היצירה ממוקם ברשומה הראשונה בתיקייה. <code class="inline">readdir</code> פועלת כמו <strong>איטרטור</strong> — כל קריאה מחזירה את הרשומה הבאה, ו-NULL כשנגמרים הקבצים. <code class="inline">struct dirent</code> מכיל שני שדות עיקריים: <code class="inline">d_fileno</code> (מספר ה-i-node) ו-<code class="inline">d_name</code> (שם הקובץ).</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">scan_dir.c</span></div>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;dirent.h&gt;
+
+int main(int argc, char **argv) {
+    DIR *pDir;
+    struct dirent *pDirent;
+
+    if ((pDir = opendir(argv[1])) == NULL)
+        exit(1);
+
+    /* מעבר על כל רשומות התיקייה והדפסת שמותיהן */
+    while ((pDirent = readdir(pDir)) != NULL)
+        printf("%s\n", pDirent-&gt;d_name);
+
+    closedir(pDir);
+    return 0;
+}</code></pre></div>
+    <p><strong>הקלט:</strong> <code class="inline">argv[1]</code> — נתיב לתיקייה. <strong>הפלט:</strong> שמות כל הקבצים והתיקיות שבתוכה, שורה לכל אחד.</p>
+
+    <h2 id="rwc">read · write · close</h2>
+    <div class="sig"><span class="c-ty">int</span> <span class="c-fn">read</span>(<span class="c-ty">int</span> fd, <span class="c-kw">void</span>* buff, <span class="c-ty">size_t</span> nbytes);   <span style="color:#7a85a3">// שואב נתונים מקובץ לזיכרון</span>
+<span class="c-ty">int</span> <span class="c-fn">write</span>(<span class="c-ty">int</span> fd, <span class="c-kw">void</span>* buff, <span class="c-ty">size_t</span> nbytes);  <span style="color:#7a85a3">// כותב מהזיכרון לקובץ</span>
+<span class="c-ty">int</span> <span class="c-fn">close</span>(<span class="c-ty">int</span> fd);</div>
+    <ul>
+      <li><strong>read</strong> — <code class="inline">buff</code> הוא היעד בזיכרון. הקריאה מתבצעת עד שהגענו ל-nbytes או עד סוף הקובץ.</li>
+      <li><strong>write</strong> — מעביר מ-<code class="inline">buff</code> לקובץ. הצלחה → מספר הבתים שנכתבו, כישלון → −1.</li>
+      <li><strong>close</strong> — מעדכן את ה-open file description שיש לו מצביע אחד פחות. כשהמונה מגיע לאפס, ה-OFD משתחרר.</li>
+    </ul>
+    <h4>דוגמה: העתקת קובץ</h4>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">copy_file.c</span></div>
+<pre><code class="language-c">#include &lt;fcntl.h&gt;
+#include &lt;unistd.h&gt;
+#define SIZE 4096
+
+int main(void) {
+    int fdin, fdout;
+    char buf[SIZE + 1];
+    int charsr;   /* chars read */
+
+    fdin = open("dugma1.txt", O_RDONLY);
+    if (fdin &lt; 0) { perror("after open"); _exit(-1); }
+
+    /* יצירה לקריאה-כתיבה עם הרשאות 0666 */
+    fdout = open("dugma2.txt", O_CREAT | O_RDWR, 0666);
+    if (fdout &lt; 0) { perror("after create"); _exit(-1); }
+
+    do {
+        charsr = read(fdin, buf, SIZE);
+        write(fdout, buf, charsr);   /* כותבים בדיוק מה שנקרא */
+    } while (charsr == SIZE);
+
+    close(fdin);
+    close(fdout);
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר משולב:</strong> פותחים מקור לקריאה ויעד ליצירה+כתיבה. בכל איטרציה <code class="inline">read</code> ממלא את <code class="inline">buf</code> וה-<strong>קלט</strong> ל-<code class="inline">write</code> הוא בדיוק <code class="inline">charsr</code> (מספר הבתים שנקראו) — לא <code class="inline">SIZE</code>, אחרת היינו כותבים זבל בסוף. הלולאה נעצרת כשקראנו פחות מ-SIZE (סוף קובץ).</p>
+
+    <h2 id="dup">משפחת dup</h2>
+    <div class="sig">#include &lt;unistd.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">dup</span>(<span class="c-ty">int</span> oldfd);               <span style="color:#7a85a3">// עותק באינדקס הפנוי הנמוך ביותר</span>
+<span class="c-ty">int</span> <span class="c-fn">dup2</span>(<span class="c-ty">int</span> oldfd, <span class="c-ty">int</span> newfd);  <span style="color:#7a85a3">// מאלץ את newfd להצביע לאן ש-oldfd מצביע</span></div>
+    <p>הקריאות משכפלות fd — כמה אינדקסים בטבלה מצביעים על אותו קובץ פתוח. <strong>למה?</strong> עבור ניתוב מחדש. אם כתבנו תוכנית עם הרבה הדפסות, במקום לשנות את כל הקוד — נשתמש ב-<code class="inline">dup2</code> כדי לומר למערכת "מעכשיו כל מה שאמור ללכת למסך, שלחי אותו ל-fd של הקובץ".</p>
+
+    <h2 id="redir">I/O Redirection</h2>
+    <p>היכולת להפנות קלט/פלט סטנדרטי למקומות אחרים. <code class="inline">ls &gt; file.txt</code> ינתב את ההדפסה לקובץ. מאחורי הקלעים זה ממומש ב-dup: פותחים את הקובץ ומקבלים fd, ואז <code class="inline">dup2</code> מעתיק את ה-fd של הקובץ לתוך ה-fd של ה-IO.</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">redirect.c</span></div>
+<pre><code class="language-c">#include &lt;fcntl.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;stdio.h&gt;
+
+int main(int argc, char **argv) {
+    printf("This goes to the standard output.\n");
+
+    int newfd = open(argv[1], O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    printf("Now the standard output will go to \"%s\".\n", argv[1]);
+
+    dup2(newfd, 1);   /* כל מה שנכתב ל-stdout (fd=1) ילך לקובץ */
+
+    printf("This goes to the file.\n");  /* כבר לא למסך! */
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר:</strong> אחרי <code class="inline">dup2(newfd, 1)</code>, ה-fd מספר 1 (stdout) מצביע על הקובץ. לכן ההדפסה האחרונה נכתבת לקובץ ולא למסך.</p>
+
+    <h2 id="lseek">lseek — גישה לכל מקום בקובץ</h2>
+    <div class="sig">#include &lt;sys/types.h&gt;
+#include &lt;unistd.h&gt;
+<span class="c-ty">off_t</span> <span class="c-fn">lseek</span>(<span class="c-ty">int</span> fd, <span class="c-ty">off_t</span> offset, <span class="c-ty">int</span> whence);</div>
+    <p>משנה את ה-offset הנוכחי של ה-fd. <code class="inline">whence</code>:</p>
+    <ul>
+      <li><code class="inline">SEEK_SET</code> — ההיסט מתחילת הקובץ.</li>
+      <li><code class="inline">SEEK_CUR</code> — ההיסט מהמיקום הנוכחי.</li>
+      <li><code class="inline">SEEK_END</code> — ההיסט מסוף הקובץ.</li>
+    </ul>
+    <p>הצלחה → מיקום הסמן החדש, אחרת −1.</p>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">file_size.c</span></div>
+<pre><code class="language-c">/* טריק לקבלת גודל קובץ: קופצים לסוף ומקבלים את ההיסט */
+off_t size = lseek(fd, 0, SEEK_END);</code></pre></div>
+
+    <h2 id="chmod">chmod</h2>
+    <div class="sig">#include &lt;sys/stat.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">chmod</span>(<span class="c-kw">const</span> <span class="c-ty">char</span>* path, <span class="c-ty">mode_t</span> mod);</div>
+    <p>אחראית על אבטחה והרשאות במערכת הקבצים — משנה מי רשאי לקרוא/לכתוב/להריץ קובץ. <code class="inline">mod</code> מיוצג לרוב כערך אוקטלי או כשילוב ביטים.</p>
+
+    <h2 id="errno">errno · perror</h2>
+    <div class="sig">#include &lt;errno.h&gt;
+<span class="c-kw">extern</span> <span class="c-ty">int</span> errno;
+
+#include &lt;stdio.h&gt;
+<span class="c-kw">void</span> <span class="c-fn">perror</span>(<span class="c-kw">const</span> <span class="c-ty">char</span> *s);</div>
+    <p>כמעט כל קריאת מערכת מעדכנת את המשתנה הגלובלי <code class="inline">errno</code> בקוד מספרי שמייצג את סיבת השגיאה. <code class="inline">perror</code> מדפיסה ל-stderr את ה-string שהועבר, ואז נקודתיים, רווח, והודעת השגיאה המתאימה ל-errno.</p>
+
+    <h2 id="buffer">האם כל read מבצעת קריאה פיזית מהדיסק?</h2>
+    <p><strong>לא!</strong> קריאה מהדיסק יקרה מאוד. לכן נוקטים באסטרטגיית הבלוקים: כשהתוכנית מבקשת בייט בודד, המערכת קוראת <strong>בלוק שלם</strong> ושומרת אותו בקאש. בקשה לבייט הבא תגיע ישר מהזיכרון המהיר.</p>
+    <div class="note info"><div class="note-title">📌 fread / fwrite מול read / write</div><p>פונקציות ספריית <code class="inline">f</code> מנהלות חוצץ פנימי ב-user-space. רק כשהבאפר מתמלא — מתבצעת קריאת מערכת אחת גדולה. זה חוסך overhead של מעבר user↔kernel, אבל המחיר: אם התהליך קורס, מידע שנשאר בבאפר <strong>יעלם</strong>.</p></div>
+    <p>כדי לחייב כתיבה פיזית — 2 דרכים:</p>
+    <ul>
+      <li><strong>דגל <code class="inline">O_SYNC</code></strong> בפתיחת קובץ — כל כתיבה חסומה עד שהמערכת מאשרת שהמידע נכתב פיזית לדיסק.</li>
+      <li><strong>הפונקציה <code class="inline">fsync</code></strong> — מכריחה לרוקן את כל הבאפר לדיסק בנקודת זמן מסוימת (אחרי סדרת כתיבות).</li>
+    </ul>
+    <p>בנוסף: <code class="inline">fprintf</code> מאפשרת הדפסה בפורמט printf לתוך קובץ, ו-<code class="inline">fscanf</code> קריאה בפורמט scanf מקובץ.</p>
+
+    <h2 id="story">🎁 סיפור סוף התרגול</h2>
+    <div class="story">
+      <div class="story-tag">📖 תרגול 5 — "הכל זה קובץ"</div>
+      <p>הפילוסופיה של Unix אומרת ש-file descriptors הם לא רק לקריאת טקסט. ב-Linux: <code class="inline">/dev/null</code> זורק הכל, <code class="inline">/dev/random</code> מייצר בתים אקראיים, ו-<code class="inline">/proc/cpuinfo</code> מראה מידע על ה-CPU — אבל הוא נוצר בזמן אמת ע"י הקרנל; אין קובץ אמיתי בדיסק.</p>
+      <p>הקריאה <code class="inline">dup()</code> שלמדתם היא האופן שבו ה-shell מממש I/O redirection: כשאתם כותבים <code class="inline">ls &gt; output.txt</code>, ה-shell קורא ל-<code class="inline">dup2()</code> כדי להחליף את ה-fd של stdout באחד שמצביע לקובץ.</p>
+      <p class="moral">המסר: הכוח האמיתי לא במורכבות הכלים, אלא בפשטות הממשק. כשמזקקים את המציאות לשפה אחת אחידה — מפסיקים לנהל בעיות נקודתיות ומתחילים לשלוט בארכיטקטורה של הפתרון.</p>
+    </div>
+
+  </article>
+</div>
+
+<nav class="pager">
+  <a class="prev" href="tirgul4.html"><span class="dir">→ הקודם</span><div class="ttl">תרגול 4 · Threads</div></a>
+  <a class="next" href="tirgul6.html"><span class="dir">הבא ←</span><div class="ttl">תרגול 6 · Semaphores</div></a>
+</nav>
+
+<footer class="footer">סיכום מערכות הפעלה · © גיא יער-און</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>

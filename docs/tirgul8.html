@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>תרגול 8 — Signals (חלק ב') | מערכות הפעלה</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b54e6'/><text x='50' y='70' font-size='58' text-anchor='middle' fill='white' font-family='monospace'>OS</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><span class="logo">OS</span><span>מערכות הפעלה · תרגולים</span></a>
+    <span class="spacer"></span>
+    <a class="nav-link" href="index.html">כל התרגולים</a>
+    <button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+
+<section class="article-head">
+  <div class="container">
+    <div class="breadcrumb"><a href="index.html">תרגולים</a> ‹ תרגול 8</div>
+    <span class="pill">תרגול 8</span>
+    <h1>סיגנלים — חלק ב' (חסימה וסנכרון)</h1>
+    <p class="lead">דרכי שליחה, בעיית סנכרון בטיפול בסיגנלים, חסימה ומצב PENDING, sigprocmask וקבוצות סיגנלים, sigaction עם sa_mask, sigpending וירושת סיגנלים.</p>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>בתרגול הזה</h4>
+    <ul>
+      <li><a href="#channels">דרכי שליחה</a></li>
+      <li><a href="#sync">בעיית סנכרון</a></li>
+      <li><a href="#procmask">sigprocmask</a></li>
+      <li><a href="#sets">פעולות על קבוצות</a></li>
+      <li><a href="#action">sigaction</a></li>
+      <li><a href="#pending">sigpending</a></li>
+      <li><a href="#inherit">ירושת סיגנלים</a></li>
+      <li><a href="#story">סיפור סוף התרגול</a></li>
+    </ul>
+  </aside>
+
+  <article class="content">
+
+    <h2 id="channels">דרכי שליחת סיגנלים</h2>
+    <ul>
+      <li><strong>ישירות מהמקלדת</strong> — <kbd class="kbd">Ctrl+C</kbd> שולח <code class="inline">SIGINT</code> (עצירה מיידית), <kbd class="kbd">Ctrl+Z</kbd> שולח <code class="inline">SIGTSTP</code> (השהיה, לא הריגה).</li>
+      <li><strong>מהטרמינל</strong> — <code class="inline">kill -signalNum/signalName pid</code> שולח סיגנל לכל תהליך.</li>
+      <li><strong>באמצעות system calls</strong> — שליחה מקוד תכנות.</li>
+    </ul>
+
+    <h2 id="sync">בעיית סנכרון</h2>
+    <p>כשתהליך מקבל סיגנל, הקרנל עוצר את זרם הריצה ומפנה את ה-CPU לפונקציית הטיפול. אבל מה קורה אם בזמן הטיפול בסיגנל א' מגיע סיגנל ב'? מצב כזה עלול להוביל לבעיות סנכרון קשות. הפתרון: <strong>חסימת סיגנלים</strong>.</p>
+    <ul>
+      <li><strong>השהיה זמנית</strong> — סיגנל חסום שנשלח עובר למצב <code class="inline">PENDING</code>: המערכת רושמת שהגיע, אך לא מאפשרת לו לקטוע את הריצה.</li>
+      <li>כשהקוד הרגיש מסתיים והחסימה מוסרת, הקרנל בודק את התור ומספק את הסיגנלים מיד.</li>
+      <li><strong>עיקרון חשוב:</strong> אם בזמן חסימה נשלחו 5 סיגנלים של SIGINT — המערכת לא תשמור את כל החמישה. פונקציית הטיפול תתבצע <strong>פעם אחת בלבד</strong>.</li>
+      <li>שני סיגנלים שלא ניתן לחסום — <code class="inline">SIGKILL</code>, <code class="inline">SIGSTOP</code>.</li>
+    </ul>
+
+    <h2 id="procmask">sigprocmask</h2>
+    <div class="sig">#include &lt;signal.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">sigprocmask</span>(<span class="c-ty">int</span> how, <span class="c-kw">const</span> <span class="c-ty">sigset_t</span> *set, <span class="c-ty">sigset_t</span> *oldset);</div>
+    <p>מאפשרת לתהליך לשנות את ה-signal mask שלו. שלושה פרמטרים:</p>
+    <ol>
+      <li><strong>how</strong> — כיצד לשנות את המסכה. למשל <code class="inline">SIG_BLOCK</code> — הסיגנלים שב-set יתווספו למסכת החסימה הקיימת.</li>
+      <li><strong>set</strong> — מצביע לקבוצת הסיגנלים שעליהם נחיל את הפעולה.</li>
+      <li><strong>oldset</strong> — מצביע למבנה שבו תישמר מסכת החסימה הישנה (לשחזור מאוחר). ניתן לשלוח <code class="inline">NULL</code>.</li>
+    </ol>
+    <p>ערך חזרה: 0 בהצלחה, −1 בשגיאה.</p>
+
+    <h2 id="sets">פעולות על קבוצות סיגנלים (sigset_t)</h2>
+    <div class="sig"><span class="c-ty">int</span> <span class="c-fn">sigemptyset</span>(<span class="c-ty">sigset_t</span> *set);              <span style="color:#7a85a3">// קבוצה ריקה</span>
+<span class="c-ty">int</span> <span class="c-fn">sigfillset</span>(<span class="c-ty">sigset_t</span> *set);               <span style="color:#7a85a3">// קבוצה מלאה (כל הסיגנלים)</span>
+<span class="c-ty">int</span> <span class="c-fn">sigaddset</span>(<span class="c-ty">sigset_t</span> *set, <span class="c-ty">int</span> signum);   <span style="color:#7a85a3">// הוספת סיגנל</span>
+<span class="c-ty">int</span> <span class="c-fn">sigdelset</span>(<span class="c-ty">sigset_t</span> *set, <span class="c-ty">int</span> signum);   <span style="color:#7a85a3">// הסרת סיגנל</span>
+<span class="c-ty">int</span> <span class="c-fn">sigismember</span>(<span class="c-ty">sigset_t</span> *set, <span class="c-ty">int</span> signum); <span style="color:#7a85a3">// בדיקת חברות</span></div>
+    <p><code class="inline">sigemptyset/sigfillset/sigaddset/sigdelset</code> מחזירים 0 בהצלחה, −1 בכישלון. <code class="inline">sigismember</code> מחזיר 1 אם signum בקבוצה, 0 אם לא, −1 בכישלון.</p>
+
+    <h4>דוגמה: חסימת SIGUSR1</h4>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">block_demo.c</span></div>
+<pre><code class="language-c">#include &lt;signal.h&gt;
+
+int main(void) {
+    /* נניח שכבר חסומים SIGSEGV ו-SIGTERM */
+    sigset_t x, y;
+
+    sigemptyset(&amp;x);            /* מנקה ערכי זבל מהקבוצה */
+    sigaddset(&amp;x, SIGUSR1);     /* מוסיף SIGUSR1 לקבוצה */
+
+    /* מוסיף את x למסכה הקיימת, שומר את הישנה ב-y */
+    sigprocmask(SIG_BLOCK, &amp;x, &amp;y);
+
+    /* ... קטע קריטי שבו SIGUSR1 לא יפריע ... */
+
+    sigprocmask(SIG_SETMASK, &amp;y, NULL);   /* שחזור המצב הקודם */
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר משולב:</strong> מאתחלים קבוצה ריקה <code class="inline">x</code>, מוסיפים אליה את <code class="inline">SIGUSR1</code>, ואז <code class="inline">sigprocmask(SIG_BLOCK, &amp;x, &amp;y)</code> מוסיף אותו לחסימה הקיימת ושומר את המסכה הישנה ב-<code class="inline">y</code>. בסיום הקטע הקריטי משחזרים בדיוק את המצב הקודם.</p>
+
+    <div class="note warn">
+      <div class="note-title">⚠️ למה sigprocmask לא מספיק?</div>
+      <p>הבעיה בנקודת הזמן: פעולת החסימה דורשת לכתוב שורות קוד ולקרוא לפונקציה — וכל עוד לא הגענו אליהן, התוכנית חשופה. למשל: ייתכן שכבר נכנסנו לפונקציית הטיפול והגיע סיגנל נוסף לפני שביצענו חסימה. לכן נדרש מנגנון מובנה יותר — <strong>sigaction</strong>.</p>
+    </div>
+
+    <h2 id="action">sigaction</h2>
+    <div class="sig">#include &lt;signal.h&gt;
+<span class="c-ty">int</span> <span class="c-fn">sigaction</span>(<span class="c-ty">int</span> signum,
+              <span class="c-kw">const</span> <span class="c-kw">struct</span> <span class="c-ty">sigaction</span> *act,
+              <span class="c-kw">struct</span> <span class="c-ty">sigaction</span> *oldact);</div>
+    <p>בניגוד ל-<code class="inline">signal()</code>, ה-<code class="inline">sigaction()</code> דואגת לחסימה של סיגנלים מסוימים <strong>במהלך</strong> הטיפול. הצלחה → 0, כישלון → −1. <code class="inline">act</code> מצביע להגדרות החדשות, <code class="inline">oldact</code> ישמור את הקודמות.</p>
+    <p>מבנה <code class="inline">struct sigaction</code>:</p>
+    <ul>
+      <li><strong>sa_handler</strong> — מצביע לפונקציית הטיפול (מקבלת את מספר האיתות).</li>
+      <li><strong>sa_mask</strong> — <strong>הפתרון לבעיית הסנכרון!</strong> מגדיר אילו איתותים ייחסמו אוטומטית בזמן שה-handler רץ. בנוסף, המערכת חוסמת אוטומטית גם את האיתות שגרם לטיפול — מונע ריצה רקורסיבית של ה-handler על עצמו.</li>
+      <li><strong>sa_flags</strong> — אוסף דגלים (מופרדים ב-OR):
+        <ul>
+          <li><code class="inline">SA_NODEFER</code> — הסיגנל הנוכחי לא ב-mask (בעייתי לסנכרון).</li>
+          <li><code class="inline">SA_SIGINFO</code> — להשתמש ב-<code class="inline">sa_sigaction</code> במקום ב-<code class="inline">sa_handler</code>.</li>
+          <li><code class="inline">SA_RESETHAND</code> — מחזיר את ה-handler ל-SIG_DFL בכניסה אליו.</li>
+        </ul>
+      </li>
+    </ul>
+    <div class="code-wrap"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="label">sigaction_demo.c</span></div>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;unistd.h&gt;
+
+void handler(int sig) {
+    printf("handling %d safely...\n", sig);
+    sleep(2);   /* גם אם יגיעו SIGINT נוספים — הם ייחסמו עד שנסיים */
+}
+
+int main(void) {
+    struct sigaction act;
+    act.sa_handler = handler;
+    sigemptyset(&amp;act.sa_mask);
+    sigaddset(&amp;act.sa_mask, SIGINT);   /* חסום SIGINT בזמן הטיפול */
+    act.sa_flags = 0;
+
+    sigaction(SIGINT, &amp;act, NULL);
+
+    while (1) pause();
+    return 0;
+}</code></pre></div>
+    <p><strong>הסבר משולב:</strong> ממלאים <code class="inline">struct sigaction</code>: <code class="inline">sa_handler</code> מצביע לפונקציה, וב-<code class="inline">sa_mask</code> מוסיפים את SIGINT כך שגם אם יגיעו SIGINT נוספים בזמן ה-handler — הם ייחסמו ויטופלו אחר כך (פעם אחת). זהו היתרון על <code class="inline">signal()</code> — אטומיות וחסימה מובנית.</p>
+
+    <h2 id="pending">בדיקת איתותים ממתינים — sigpending</h2>
+    <div class="sig"><span class="c-ty">int</span> <span class="c-fn">sigpending</span>(<span class="c-ty">sigset_t</span> *set);</div>
+    <p>מקבלת set ריק וממלאת אותו באיתותים שממתינים (במצב PENDING). מחזירה 0 בהצלחה, −1 בכישלון. כדי לבדוק אם איתות מסוים קיים ב-set — משתמשים ב-<code class="inline">sigismember</code>.</p>
+
+    <h2 id="inherit">ירושת סיגנלים</h2>
+    <div class="table-wrap"><table>
+      <tr><th>שאלה</th><th>תשובה</th></tr>
+      <tr><td>האם תהליך בן יורש את הסיגנלים הממתינים לאב?</td><td><strong>לא</strong></td></tr>
+      <tr><td>האם תהליך בן יורש את signal handlers ואת ה-signal mask מהאב?</td><td><strong>כן</strong></td></tr>
+      <tr><td>האם exec יורש את הסיגנלים הממתינים לתהליך המקורי?</td><td><strong>כן</strong> — זהו עדיין אותו תהליך (אותו PID)</td></tr>
+    </table></div>
+    <p>כדי להתעלם מהסיגנלים אחרי הורדת החסימה, ניתן להגדיר להם את פעולת <code class="inline">SIG_IGN</code>.</p>
+
+    <h2 id="story">🎁 סיפור סוף התרגול</h2>
+    <div class="story">
+      <div class="story-tag">📖 תרגול 8 — חולשת OpenSSH (2006)</div>
+      <p>בקוד של שרתי OpenSSH הוגדר Signal Handler לטיפול ב-SIGALRM (שמופעל אם המשתמש לא מסיים להתחבר בזמן קצוב). בגלל אי-חסימה של איתותים, ה-SIGALRM הגיע בדיוק כשהתוכנית הראשית הייתה באמצע <code class="inline">malloc()</code> או <code class="inline">free()</code>.</p>
+      <p>מטפל האיתותים ניסה בעצמו לבצע פעולת ניהול זיכרון, מה שגרם לשיבוש (<strong>Double Free</strong>). האקרים ניצלו את 'מרוץ האיתותים' (Race Condition) כדי לעקוף את מנגנון ההזדהות ולהשתלט על השרתים מרחוק.</p>
+      <p class="moral">המסר: בדיוק כמו ש-sigprocmask חוסם רעשי רקע ומגן על קטעי קוד קריטיים — גם בחיים צריך לדעת מתי להפעיל 'מסיכת חסימה' על הסחות דעת כדי להתמקד במה שחשוב.</p>
+    </div>
+
+  </article>
+</div>
+
+<nav class="pager">
+  <a class="prev" href="tirgul7.html"><span class="dir">→ הקודם</span><div class="ttl">תרגול 7 · Signals א'</div></a>
+  <a class="next" href="tirgul9.html"><span class="dir">הבא ←</span><div class="ttl">תרגול 9 · Links</div></a>
+</nav>
+
+<footer class="footer">סיכום מערכות הפעלה · © גיא יער-און</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="assets/script.js"></script>
+</body>
+</html>
